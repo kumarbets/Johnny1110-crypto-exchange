@@ -129,18 +129,33 @@
   }
   .diagram { background:#fafafa; border:1px solid var(--border); border-radius:8px; padding:14px; overflow-x:auto; }
   .diagram pre { background:transparent; color:#222; font-size:0.8rem; padding:0; }
+  /* long inline code (import paths etc.) must never force horizontal page scroll */
+  code { overflow-wrap: anywhere; word-break: break-word; }
+  table { -webkit-overflow-scrolling: touch; }
+  pre  { -webkit-overflow-scrolling: touch; }
   @media (max-width: 768px) {
-    body { padding: 14px 10px 80px; }
-    h1 { font-size: 1.45rem; }
-    h2 { font-size: 1.2rem; }
-    h3 { font-size: 1.05rem; }
-    pre { font-size: 0.78rem; padding: 10px 12px; }
+    body { padding: 14px 9px 84px; }
+    .wrap { max-width: 100%; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.18rem; margin-top: 1.8em; }
+    h3 { font-size: 1.03rem; }
+    p, li { font-size: 0.94rem; }
+    pre { font-size: 0.76rem; padding: 10px 12px; }
     table { font-size: 0.82rem; }
+    th, td { padding: 6px 8px; }
+    .step { padding: 13px; margin: 18px 0; }
+    .top-btn { right: 10px; bottom: 10px; padding: 8px 12px; font-size: 0.8rem; opacity: 0.92; }
   }
   @media (max-width: 480px) {
-    pre { font-size: 0.72rem; }
-    .step { padding: 12px; }
-    .diagram pre { font-size: 0.68rem; }
+    body { padding: 12px 7px 84px; }
+    h1 { font-size: 1.22rem; }
+    h2 { font-size: 1.08rem; }
+    pre { font-size: 0.7rem; padding: 9px 10px; }
+    table { font-size: 0.78rem; }
+    .step { padding: 11px; }
+    .diagram pre { font-size: 0.64rem; line-height: 1.35; }
+    .toc ol { padding-left: 16px; }
+    .top-btn { padding: 7px 11px; font-size: 0.76rem; }
   }
 </style>
 </head>
@@ -192,6 +207,7 @@
   <li><a href="#a16">A.16 &mdash; JSON struct tags &amp; custom marshalling</a></li>
   <li><a href="#a17">A.17 &mdash; HTTP with Gin &amp; the third-party libraries used</a></li>
   <li><a href="#a18">A.18 &mdash; Tooling cheat-sheet + how to read Go fast</a></li>
+  <li><a href="#a19">A.19 &mdash; Five more idioms you'll see (defer, context, blank import, ticker, embedding)</a></li>
 </ol>
 <strong>Part B &mdash; Build the exchange backend</strong>
 <ol start="19">
@@ -497,6 +513,25 @@ func (c *UserController) Login(ctx *gin.Context) {
 </table>
 <p>How to read an unfamiliar Go file fast: read the <code>type</code> declarations first (the nouns), then the exported methods (the verbs), then <code>main</code>/constructors to see wiring. That is exactly the order Part&nbsp;B follows.</p>
 
+<h2 id="a19">A.19 &mdash; Five more idioms you'll see</h2>
+<p>These five appear all over the exchange; recognise them and the code stops surprising you.</p>
+<table>
+<tr><th>Idiom</th><th>What it does</th><th>Where in the exchange</th></tr>
+<tr><td><code>defer f()</code></td><td>runs <code>f</code> when the surrounding function returns &mdash; used for cleanup/unlock</td><td><code>defer ob.obMu.Unlock()</code> right after locking the book; <code>defer tx.Rollback()</code> in every DB transaction</td></tr>
+<tr><td><code>context.Context</code></td><td>a request-scoped handle threaded through calls for cancellation/deadlines</td><td>first argument of nearly every service/repo method: <code>func(ctx context.Context, ...)</code></td></tr>
+<tr><td>blank import <code>_ "pkg"</code></td><td>import only for its side-effect (an <code>init()</code>), not its names</td><td><code>_ "github.com/ncruces/go-sqlite3/driver"</code> registers the SQLite driver</td></tr>
+<tr><td><code>time.Ticker</code></td><td>a channel that fires every interval &mdash; the heartbeat of a scheduler</td><td>the 300 ms snapshot / 30 s market-data / 5 min AMM loops in <code>scheduler/</code></td></tr>
+<tr><td>struct embedding</td><td>compose behaviour by embedding one struct/interface in another (Go's "inheritance")</td><td>impl structs embed shared helpers; the <code>Scheduler</code> implementations share a reporter</td></tr>
+</table>
+<pre><code>// defer + transaction pattern used by every write path
+func WithTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) error {
+    tx, err := db.Begin()
+    if err != nil { return err }
+    defer tx.Rollback()          // no-op if we Commit first; safety net on any early return
+    if err := fn(tx); err != nil { return err }   // fn does the real work
+    return tx.Commit()
+}</code></pre>
+
 <!-- ============================================================ -->
 <!-- PART B                                                       -->
 <!-- ============================================================ -->
@@ -698,6 +733,24 @@ func (ob *OrderBook) placeLimitOrder(order *model.Order) ([]Trade, error) {
 <p><code>canMatch</code> is the price-crossing test: a BID matches when <code>orderPrice &gt;= bestAsk</code>; an ASK matches when <code>orderPrice &lt;= bestBid</code>. <code>executeMatch</code> pops the best resting order, trades <code>min(incoming.Remaining, resting.Remaining)</code>, reduces both, emits a <code>Trade</code>, and puts the resting order back at the head of its level if it still has size. Market orders (<code>takeMarketBidOrder</code>/<code>takeMarketAskOrder</code>) first check the opposite side has enough <code>totalQuoteAmount</code>/<code>totalVolume</code>, then sweep it.</p>
 <div class="ok"><strong>Why it's fast.</strong> Best-price access is O(1) via the TreeMap's min/max, matching pops the front of a linked list (O(1)), and cancels are O(1) through the index. That is how the README benchmarks reach ~1.9M orders/sec.</div>
 
+<details>
+<summary>Worked example &mdash; watch one taker sweep the book</summary>
+<p>Say the <strong>ask</strong> side of BTC-USDT currently rests these maker orders (price&mdash;time priority: lowest price first, oldest first within a price):</p>
+<div class="diagram"><pre>
+ASK ladder (sellers)          a limit BUY arrives:
+  65,050  ×0.4  (M3)            side=BID  price=65,020  size=0.7  mode=TAKER
+  65,020  ×0.2  (M2, older)
+  65,020  ×0.3  (M1, newer)     canMatch(BID, 65,020, bestAsk) ?  65,020 &gt;= 65,020 ✓
+</pre></div>
+<ol>
+  <li>Best ask = <code>65,020</code>. It crosses (buy price &ge; best ask), so match. Pop <strong>M2</strong> (oldest at 65,020). Trade <code>min(0.7, 0.2)=0.2</code> @ 65,020. Incoming remaining = 0.5.</li>
+  <li>Best ask still <code>65,020</code> (M1). Trade <code>min(0.5, 0.3)=0.3</code> @ 65,020. Incoming remaining = 0.2. The 65,020 level is now empty and dropped.</li>
+  <li>Best ask = <code>65,050</code>. Buy price 65,020 &lt; 65,050 &rarr; <code>canMatch</code> is false. Stop.</li>
+  <li>Remaining 0.2 &gt; 0, so the leftover becomes a <strong>resting bid</strong> at 65,020 via <code>makeLimitOrder</code>.</li>
+</ol>
+<p>Result: two <code>Trade</code> records (0.2 and 0.3), <code>latestPrice=65,020</code>, and a new best bid of 0.2 @ 65,020. A <strong>market</strong> buy would behave the same but with no price guard &mdash; it keeps sweeping until its quote-amount is spent or the ask side runs dry.</p>
+</details>
+
 <h2 id="b6">B.6 &mdash; Step 4: the MatchingEngine facade</h2>
 <p>One engine owns one book per market and guards the map with an <code>RWMutex</code>. It is the only thing the service layer talks to.</p>
 <div class="step">
@@ -799,6 +852,49 @@ func initDB(testMode bool) (*sql.DB, error) {
 }</code></pre>
 </div>
 <p>Four tables (full DDL in <code>doc/db_schema/schema.sql</code>): <code>users</code>, <code>balances</code> (PK <code>user_id+asset</code>, with <code>available</code>/<code>locked</code>), <code>orders</code>, <code>trades</code>. Each is heavily indexed for the exact queries the app runs (user order history, active orders per market, latest price, 24h volume).</p>
+<details>
+<summary>Full schema DDL (<code>doc/db_schema/schema.sql</code>)</summary>
+<pre><code>CREATE TABLE users (
+    id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+    vip_level INTEGER DEFAULT 1, maker_fee REAL NOT NULL, taker_fee REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+
+CREATE TABLE balances (
+    user_id TEXT NOT NULL, asset TEXT NOT NULL,
+    available REAL DEFAULT 0, locked REAL DEFAULT 0,
+    PRIMARY KEY (user_id, asset));
+CREATE INDEX idx_balances_asset ON balances(asset);
+
+CREATE TABLE orders (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, market TEXT NOT NULL,
+    side INTEGER NOT NULL,          -- 0=Bid, 1=Ask
+    price REAL DEFAULT 0, original_size REAL DEFAULT 0, remaining_size REAL DEFAULT 0,
+    quote_amount REAL DEFAULT 0,    -- only for market orders
+    avg_dealt_price REAL DEFAULT 0,
+    type INTEGER NOT NULL,          -- 0=LIMIT, 1=MARKET
+    mode INTEGER NOT NULL,          -- 0=MAKER, 1=TAKER
+    status TEXT NOT NULL,           -- NEW, FILLED, CANCELED, PARTIAL
+    fee_rate REAL DEFAULT 0, fees REAL DEFAULT 0, fee_asset TEXT,
+    created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL);
+CREATE INDEX idx_orders_user_id           ON orders(user_id, status, created_at);
+CREATE INDEX idx_orders_market_side_status ON orders(market, status, created_at);  -- feeds order-book recovery
+
+CREATE TABLE trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, market TEXT NOT NULL,
+    ask_order_id TEXT NOT NULL, bid_order_id TEXT NOT NULL,
+    price REAL NOT NULL, size REAL NOT NULL,
+    bid_fee_rate REAL, ask_fee_rate REAL, timestamp DATETIME NOT NULL);
+CREATE INDEX idx_trades_timestamp ON trades(market, timestamp);</code></pre>
+</details>
+<div class="note"><strong>Seeded accounts</strong> (from <code>doc/db_schema/testing_data.sql</code>, already inside the shipped <code>app/exg.db</code>). All share one bcrypt password hash; if you don't know the plaintext, just register a fresh user &mdash; new accounts start with zeroed balances that an admin <code>manual-adjustment</code> can top up.
+<table>
+<tr><th>Username</th><th>User ID</th><th>Role</th><th>Maker / Taker fee</th></tr>
+<tr><td><code>margin_account</code></td><td><code>0</code></td><td>system / cross-collateral</td><td>0 / 0</td></tr>
+<tr><td><code>market_maker</code></td><td><code>MID250606CXAZ1199</code></td><td>AMM bot (huge balances: 500 BTC, 8000 ETH, 88.15M USDT&hellip;)</td><td>0.01% / 0.2%</td></tr>
+<tr><td><code>johnny</code></td><td><code>UID25060650F57788</code></td><td>test user (500k USDT)</td><td>0.1% / 0.2%</td></tr>
+<tr><td><code>shiqi</code>, <code>kai_btc</code>, <code>kai_eth</code>, <code>kai_dot</code></td><td>UID&hellip;</td><td>test users</td><td>0.1% / 0.2%</td></tr>
+</table>
+</div>
 <p>Repositories are defined as interfaces (<code>repository/interface.go</code>) and implemented in <code>repository/impl/</code>. The key abstraction is <code>DBExecutor</code>, satisfied by both <code>*sql.DB</code> and <code>*sql.Tx</code>, so every method runs identically inside or outside a transaction:</p>
 <pre><code>// balances repo: the atomic money primitives the engine relies on
 LockedByUserIdAndAsset(ctx, db, userId, asset, amount)    // available -&gt; locked  (freeze)
@@ -1066,6 +1162,35 @@ func NewContainer(db *sql.DB, engine *core.MatchingEngine) *Container {
 <p><code>recoverOrderBook</code> (in <code>startup_helper.go</code>) loops the markets, queries each one's <code>NEW</code>/<code>PARTIAL</code> orders, converts DTOs to engine orders and calls <code>RecoverOrderBook</code> &mdash; so a restart never loses resting liquidity. And that completes the backend: from an empty folder you now have a matching engine, a settled money layer, market data, candlesticks, live feeds and a market maker.</p>
 
 <div class="ok"><strong>You built it.</strong> The dependency order you just followed (model &rarr; book &rarr; engine &rarr; dto &rarr; repo &rarr; service &rarr; http &rarr; ohlcv/ws/scheduler &rarr; container &rarr; main) is exactly how the packages depend on each other. If it compiles bottom-up, it runs.</div>
+
+<h3 id="life-of-order">Capstone &mdash; the life of one order (all layers at once)</h3>
+<p>Trace a single "buy 0.01 BTC at market" from the click to the chart. This is the whole backend in one path:</p>
+<div class="diagram"><pre>
+POST /api/v1/orders/BTC-USDT   {side:0, order_type:1, mode:1, quote_amount:650}
+      │
+ [1] middleware.AuthMiddleware  → resolves the token to *dto.User, into gin ctx
+      │
+ [2] controller.PlaceOrder      → binds JSON to dto.OrderReq, calls OrderService.PlaceOrder
+      │
+ [3] service.initializeOrderContext → picks fee rate/asset, decides FreezeAsset=USDT, FreezeAmt=650
+      │
+ [4] service.executeOrderPlacementPhase  (ONE SQL transaction) ──────────────┐
+      │   a. balanceRepo.Locked...     available USDT → locked                │
+      │   b. orderRepo.Insert          order row, status = NEW                │ rollback
+      │   c. engine.PlaceOrder         match against ask side → []Trade       │ on any
+      │   d. tradeRepo.BatchInsert     persist the fills                      │ error
+      │   e. klineTradeStream.SyncTrade feed each trade to the OHLCV agg.     │
+      └──────────────────────────────────────────────────────────────────────┘
+      │
+ [5] service.executeTradeSettlementPhase → move locked→spent, credit BTC, deduct taker fee
+      │
+ [6] controller returns {code, data:{order, matches}}   ← browser updates "my orders"
+      │
+ [7] OHLCVAggregator rolls the trade into the 15m/1h/… bars
+ [8] SnapshotScheduler (300ms) refreshes the book snapshot
+ [9] WSDataFeeder pushes orderbook + ohlcv over :8081 → the chart & book redraw live
+</pre></div>
+<p>Every box above is a function you wrote in Part&nbsp;B. Steps [1]&ndash;[6] are synchronous (the HTTP response waits for settlement); steps [7]&ndash;[9] happen on background goroutines and reach the browser over the WebSocket a moment later.</p>
 
 <!-- ============================================================ -->
 <!-- PART C                                                       -->
