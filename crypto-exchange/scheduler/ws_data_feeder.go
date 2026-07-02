@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"github.com/johnny1110/crypto-exchange/dto"
 	"github.com/johnny1110/crypto-exchange/ohlcv"
+	"github.com/johnny1110/crypto-exchange/security"
 	"github.com/johnny1110/crypto-exchange/service"
 	"github.com/johnny1110/crypto-exchange/ws"
 	"github.com/labstack/gommon/log"
@@ -14,18 +16,27 @@ type WSDataFeederJob struct {
 	ohlcvAgg          *ohlcv.OHLCVAggregator
 	orderbookService  service.IOrderBookService
 	marketDataService service.IMarketDataService
+	credentialCache   *security.CredentialCache
+	orderService      service.IOrderService
+	balanceService    service.IBalanceService
 }
 
 func NewWSDataFeederJob(
 	wsHub *ws.Hub,
 	ohlcvAgg *ohlcv.OHLCVAggregator,
 	orderbookService service.IOrderBookService,
-	marketDataService service.IMarketDataService) Scheduler {
+	marketDataService service.IMarketDataService,
+	credentialCache *security.CredentialCache,
+	orderService service.IOrderService,
+	balanceService service.IBalanceService) Scheduler {
 	return &WSDataFeederJob{
 		wsHub:             wsHub,
 		ohlcvAgg:          ohlcvAgg,
 		orderbookService:  orderbookService,
 		marketDataService: marketDataService,
+		credentialCache:   credentialCache,
+		orderService:      orderService,
+		balanceService:    balanceService,
 	}
 }
 
@@ -83,6 +94,36 @@ func (W *WSDataFeederJob) collectAndSend(key ws.SubscriptionKey) {
 			return
 		}
 		W.wsHub.BroadcastToSubscribers(key, snapshot)
+		return
+	case ws.USER_DATA:
+		p, ok := key.Params.(ws.PrivateReqParams)
+		if !ok {
+			return
+		}
+		user, err := W.credentialCache.Get(p.Token)
+		if err != nil || user == nil {
+			return // not logged in / expired token
+		}
+		openResp, err := W.orderService.PaginationQuery(ctx, &dto.GetOrdersQueryReq{
+			UserID: user.ID, Market: p.Market, Type: dto.OPENING_ORDER, PageSize: 10, CurrentPage: 1,
+		})
+		if err != nil {
+			return
+		}
+		closedResp, err := W.orderService.PaginationQuery(ctx, &dto.GetOrdersQueryReq{
+			UserID: user.ID, Market: p.Market, Type: dto.CLOSED_ORDER, PageSize: 10, CurrentPage: 1,
+		})
+		if err != nil {
+			return
+		}
+		balances, _ := W.balanceService.GetBalances(ctx, user.ID)
+		W.wsHub.BroadcastToSubscribers(key, map[string]interface{}{
+			"open_orders":   openResp.Result,
+			"open_total":    openResp.Total,
+			"closed_orders": closedResp.Result,
+			"closed_total":  closedResp.Total,
+			"balances":      balances,
+		})
 		return
 	default:
 		return

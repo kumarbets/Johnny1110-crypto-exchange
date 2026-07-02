@@ -140,6 +140,12 @@ class WebSocketService {
 
         if (channel === 'ohlcv' && data) {
             this.handleOhlcvMessage(data, timestamp)
+        } else if (data) {
+            // generic dispatch for orderbook / markets / user_data (raw data payload)
+            const subs = this.subscribers.get(channel) || []
+            subs.forEach(cb => {
+                try { cb(data, timestamp) } catch (e) { console.error(`${channel} callback failed:`, e) }
+            })
         }
     }
 
@@ -344,6 +350,41 @@ class WebSocketService {
 
         this.sendMessage(unsubscribeMessage)
         console.log('取消訂閱 Markets')
+    }
+
+    /**
+     * 訂閱私人 (使用者) 數據: open orders + trade history + balances
+     * @param {string} token - 登入 token (identifies the user server-side)
+     * @param {string} market
+     * @param {Function} callback
+     */
+    subscribeUserData(token, market, callback) {
+        if (!this.subscribers.has('user_data')) {
+            this.subscribers.set('user_data', [])
+        }
+        this.subscribers.get('user_data').push(callback)
+
+        this.sendMessage({
+            action: 'subscribe',
+            channel: 'user_data',
+            params: { token, market }
+        })
+        console.log('subscribe user_data')
+
+        return () => this.unsubscribeUserData(token, market, callback)
+    }
+
+    unsubscribeUserData(token, market, callback) {
+        const subs = this.subscribers.get('user_data') || []
+        const i = subs.indexOf(callback)
+        if (i > -1) subs.splice(i, 1)
+
+        this.sendMessage({
+            action: 'unsubscribe',
+            channel: 'user_data',
+            params: { token, market }
+        })
+        console.log('unsubscribe user_data')
     }
 
     /**

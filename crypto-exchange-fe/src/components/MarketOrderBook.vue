@@ -260,6 +260,7 @@
 <script>
 import {authUtils} from '@/services/auth'
 import {walletAPI, orderBooksAPI, ordersAPI} from '@/services/apiService'
+import websocketService from '@/services/websocketService'
 import CommonModal from "@/components/common/CommonModal.vue";
 import KlineChart from "@/components/KLineChart.vue";
 
@@ -313,6 +314,9 @@ export default {
       closedTotal: 0,
       opsLastCount: null,
       opsLastTs: null,
+      obUnsub: null,
+      userUnsub: null,
+      refreshInterval: null,
       orderType: 'limit',
       market: "",
       placeOrderBtn: "Buy",
@@ -389,6 +393,9 @@ export default {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval)
     }
+    // tear down WS subscriptions
+    if (this.obUnsub) { this.obUnsub(); this.obUnsub = null }
+    if (this.userUnsub) { this.userUnsub(); this.userUnsub = null }
   },
   methods: {
 
@@ -565,40 +572,46 @@ export default {
       this.cmdOutputList.push(`C:\\CryptoEx> trading ${this.market} - ${side} order placed.\n`);
     },
 
+    // Apply an order-book snapshot payload (same shape from REST snapshot or the
+    // WebSocket 'orderbook' channel).
+    applyOrderBookData(data) {
+      if (!data) return
+      this.latestPrice = data.latest_price;
+      const bidSide = data.bid_side || [];
+      const askSide = data.ask_side || [];
+      const topFiveBid = [...bidSide].sort((a, b) => b.price - a.price).slice(0, 5);
+      const bottomFiveAsk = [...askSide].sort((a, b) => a.price - b.price).slice(0, 5).reverse();
+      this.bidSide = topFiveBid;
+      this.askSide = bottomFiveAsk;
+      this.maxBidVolume = Math.max(...this.bidSide.map((b) => b.volume), 0);
+      this.maxAskVolume = Math.max(...this.askSide.map((a) => a.volume), 0);
+    },
+
+    // one-shot initial load; live updates arrive over the WS 'orderbook' channel
     async fetchOrderBook() {
       try {
         const res = await orderBooksAPI.getOrderBook(this.market);
-        const data = res.data.data;
-
-        this.latestPrice = data.latest_price;
-
-
-// 假設 data.bid_side 和 data.ask_side 的結構如下：
-// [{ price: 100 }, { price: 200 }, ...]
-
-        let bidSide = data.bid_side;
-        let askSide = data.ask_side;
-
-// 取得最大前五個的 bid_side
-        let topFiveBid = [...bidSide]
-            .sort((a, b) => b.price - a.price) // 由大到小排序
-            .slice(0, 5); // 取前五個
-
-// 取得最小前五個的 ask_side
-        let bottomFiveAsk = [...askSide]
-            .sort((a, b) => a.price - b.price) // 由小到大排序
-            .slice(0, 5) // 取前五個
-            .reverse();
-
-// 返回結果到 this
-        this.bidSide = topFiveBid;
-        this.askSide = bottomFiveAsk;
-        // 計算最大量，用於 bar 寬度百分比
-        this.maxBidVolume = Math.max(...this.bidSide.map((b) => b.volume));
-        this.maxAskVolume = Math.max(...this.askSide.map((a) => a.volume));
+        this.applyOrderBookData(res.data.data);
       } catch (error) {
         console.error("Failed to fetch order book:", error);
       }
+    },
+
+    // Apply the private 'user_data' WS payload: open orders + trade history + balances.
+    applyUserData(data) {
+      if (!data) return
+      this.openOrders = data.open_orders || []
+      this.orderHistory = data.closed_orders || []
+      this.openTotal = data.open_total || 0
+      this.closedTotal = data.closed_total || 0
+      if (Array.isArray(data.balances)) {
+        this.balances = data.balances
+        const base = data.balances.find(b => b.asset === this.baseAsset)
+        const quote = data.balances.find(b => b.asset === this.quoteAsset)
+        if (base) this.baseBalance = base.available
+        if (quote) this.quoteBalance = quote.available
+      }
+      this.updateOrdersPerSec()
     },
 
     async handlePriceUpdate(data) {
@@ -681,17 +694,26 @@ export default {
       return JSON.stringify(cmdData, null, 2)
     },
 
-    startAutoRefresh() {
-      this.refreshInterval = setInterval(() => {
-        //this.fetchBalances()
-        this.fetchOrderBook()
-        // also refresh the logged-in user's open orders + trade history live
-        if (authUtils.isAuthenticated()) {
-          this.fetchOpenOrders()
-          this.fetchClosedOrders() // this also recomputes ordersPerSec
-          this.fetchBalances()
-        }
-      }, 1000) // refresh every 1s
+    // Live updates are push-based over WebSocket now (no REST polling):
+    //  - public 'orderbook' channel -> order book snapshot
+    //  - private 'user_data' channel -> this user's open orders, trades, balances
+    async startAutoRefresh() {
+      try {
+        await websocketService.connect('remote')
+      } catch (e) {
+        console.error('WS connect failed, falling back to REST polling', e)
+        this.refreshInterval = setInterval(() => {
+          this.fetchOrderBook()
+          if (authUtils.isAuthenticated()) {
+            this.fetchOpenOrders(); this.fetchClosedOrders(); this.fetchBalances()
+          }
+        }, 1000)
+        return
+      }
+      this.obUnsub = websocketService.subscribeOrderbook(this.market, (data) => this.applyOrderBookData(data))
+      if (authUtils.isAuthenticated()) {
+        this.userUnsub = websocketService.subscribeUserData(authUtils.getToken(), this.market, (data) => this.applyUserData(data))
+      }
     },
 
     // Orders never get deleted (cancel = status change), so the account's total

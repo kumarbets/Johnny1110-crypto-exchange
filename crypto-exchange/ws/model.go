@@ -10,6 +10,7 @@ type WSChannel string
 const OHLCV = WSChannel("ohlcv")
 const ORDERBOOK = WSChannel("orderbook")
 const MARKETS = WSChannel("markets")
+const USER_DATA = WSChannel("user_data") // private: per-user open orders + trade history + balances
 
 type WSAction string
 
@@ -33,6 +34,12 @@ type OHLCVReqParams struct {
 
 // OrderBook params
 type OrderBookReqParams struct {
+	Market string `json:"market"`
+}
+
+// Private (user_data) params: token identifies the user, market scopes the orders
+type PrivateReqParams struct {
+	Token  string `json:"token"`
 	Market string `json:"market"`
 }
 
@@ -71,6 +78,16 @@ func BuildSubscriptionKey(req WSReq) (SubscriptionKey, error) {
 
 	case ORDERBOOK:
 		var params OrderBookReqParams
+		if err := json.Unmarshal(paramsBytes, &params); err != nil {
+			return SubscriptionKey{}, err
+		}
+		return SubscriptionKey{
+			Channel: req.Channel,
+			Params:  params,
+		}, nil
+
+	case USER_DATA:
+		var params PrivateReqParams
 		if err := json.Unmarshal(paramsBytes, &params); err != nil {
 			return SubscriptionKey{}, err
 		}

@@ -244,6 +244,8 @@
   <li><a href="#d3">D.3 &mdash; Making live high-frequency trading visible in the UI</a></li>
   <li><a href="#d4">D.4 &mdash; The load-test harness &amp; the 5-user HFT demo (how to log in)</a></li>
   <li><a href="#d5">D.5 &mdash; Go &amp; database concepts these changes teach</a></li>
+  <li><a href="#d6">D.6 &mdash; WebSocket-first data flow (public + private channels)</a></li>
+  <li><a href="#d7">D.7 &mdash; Hosting the whole stack on one VM</a></li>
 </ol>
 </details>
 
@@ -1450,7 +1452,44 @@ Each user is funded with large BTC + USDT so the generator never runs out. Balan
 </table>
 <div class="note"><strong>The one-sentence takeaway:</strong> a matching engine's speed is bounded by memory, but a <em>real exchange's</em> speed is bounded by how it makes trades durable &mdash; which is why the interesting engineering lives in the persistence and settlement layers, exactly where this codebase spends its complexity.</div>
 
-<p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents changes made in this working copy (SQLite WAL tuning in <code>db.go</code>; live-refresh in <code>MarketOrderBook.vue</code>; front-end backend-pointer) and the measured throughput behind them. License of the original project: non-commercial use only.</p>
+<h2 id="d6">D.6 &mdash; WebSocket-first data flow (public + private channels)</h2>
+<p>The UI originally polled REST every second (order book <em>and</em> the per-user orders/trades/balances we added), which is a lot of chatter. We moved everything to WebSocket. The important insight is a <strong>public vs private</strong> split:</p>
+<table>
+<tr><th>Data</th><th>Channel</th><th>Type</th><th>Keyed by</th></tr>
+<tr><td>Candlesticks</td><td><code>ohlcv</code></td><td>public</td><td>symbol + interval</td></tr>
+<tr><td>Order book (top-20 snapshot)</td><td><code>orderbook</code></td><td>public</td><td>market</td></tr>
+<tr><td>All-markets summary</td><td><code>markets</code></td><td>public</td><td>&mdash;</td></tr>
+<tr><td>Your open orders + trade history + balances</td><td><code>user_data</code></td><td><strong>private</strong></td><td>token (&rarr; user) + market</td></tr>
+</table>
+<p>Two surprises we fixed:</p>
+<ol>
+  <li><strong>The backend already pushed <code>orderbook</code> and <code>markets</code></strong> (the <code>WSDataFeederJob</code> handled those cases and reused the cached order-book <em>snapshot</em>) &mdash; but the front-end's <code>handleMessage</code> only dispatched <code>ohlcv</code>, so those messages were silently dropped. A three-line generic dispatcher fixed the public side, front-end only.</li>
+  <li><strong>There was no private channel at all.</strong> We added one, minimally, by extending the <em>same</em> 1-second feeder rather than inventing new machinery:</li>
+</ol>
+<pre><code>// scheduler/ws_data_feeder.go — the new private case (server pushes, client never polls)
+case ws.USER_DATA:
+    p := key.Params.(ws.PrivateReqParams)
+    user, err := W.credentialCache.Get(p.Token)     // token -&gt; user (same cache the REST auth uses)
+    if err != nil || user == nil { return }
+    openResp,  _ := W.orderService.PaginationQuery(ctx, &amp;dto.GetOrdersQueryReq{UserID: user.ID, Market: p.Market, Type: dto.OPENING_ORDER, ...})
+    closedResp,_ := W.orderService.PaginationQuery(ctx, &amp;dto.GetOrdersQueryReq{UserID: user.ID, Market: p.Market, Type: dto.CLOSED_ORDER,  ...})
+    balances,  _ := W.balanceService.GetBalances(ctx, user.ID)
+    W.wsHub.BroadcastToSubscribers(key, map[string]interface{}{
+        "open_orders": openResp.Result, "open_total": openResp.Total,
+        "closed_orders": closedResp.Result, "closed_total": closedResp.Total,
+        "balances": balances})</code></pre>
+<p>Total change for the private feed: <strong>3 constants/structs</strong> in <code>ws/model.go</code>, <strong>one</strong> <code>case</code> in the existing feeder, and <strong>one</strong> line in the container to inject the extra services. On the front-end, one generic dispatcher plus a <code>subscribeUserData(token, market)</code>, and the 1-second polling loop is deleted. Why the token as the key? The client authenticates once at login and holds a token; passing it as the subscription param lets the server resolve the user with the <em>same</em> in-memory credential cache the REST auth uses &mdash; no new auth path. Because the push is server-scheduled (once/second, debounced by design), a browser tab makes <em>zero</em> per-second REST calls now; the order book and the user's own orders/trades/balances all arrive over one socket.</p>
+<div class="note"><strong>What still can't be WebSocket, and why.</strong> The push is a fixed 1&nbsp;Hz snapshot, not a per-event stream. Truly event-driven per-user pushes (fire exactly when <em>your</em> order fills) would mean emitting an event from the order hot path and routing it to your socket &mdash; more moving parts, and at hundreds of orders/sec it would hammer the single SQLite writer. The 1&nbsp;Hz snapshot is the minimal clean design: live enough to watch, cheap enough not to fight the write path.</div>
+
+<h2 id="d7">D.7 &mdash; Hosting the whole stack on one VM</h2>
+<p>For the live demo both halves run on a single machine, reachable from any browser:</p>
+<ul>
+  <li><strong>Backend</strong> &mdash; the cross-compiled static binary under <code>systemd</code> (<code>:8080</code> REST, <code>:8081</code> WS).</li>
+  <li><strong>Frontend</strong> &mdash; <code>npm run build</code> locally, then the <code>dist/</code> served by a ~20-line Go static file server (also under <code>systemd</code>, on <code>:80</code>) with an SPA fallback: any unknown path returns <code>index.html</code> so deep links like <code>/markets/BTC-USDT</code> work on refresh. <code>BASE_URL</code> and the WS endpoint in the front-end are set to the VM's IP before building.</li>
+</ul>
+<p>Open <code>http://&lt;VM_IP&gt;/markets/BTC-USDT</code> and the page talks to the same box for REST, WS, and static assets. The static server is external tooling (like the load generator) &mdash; not part of the application module, so the repo stays clean.</p>
+
+<p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents the changes made in this working copy &mdash; SQLite WAL tuning (<code>db.go</code>); a WebSocket-first data flow with a new private <code>user_data</code> channel (<code>ws/model.go</code>, <code>scheduler/ws_data_feeder.go</code>, <code>container/container.go</code>, front-end <code>websocketService.js</code> + <code>MarketOrderBook.vue</code>); and the measured throughput behind them. License of the original project: non-commercial use only.</p>
 
 </div>
 </body>
