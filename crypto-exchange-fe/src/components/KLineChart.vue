@@ -30,7 +30,7 @@ import websocketService from '@/services/websocketService'
 // eslint-disable-next-line no-undef
 const props = defineProps({
   market: {type: String, default: 'ETH-USDT'},
-  interval: {type: String, default: '15m'},
+  interval: {type: String, default: '1m'},
 })
 
 const chartContainer = ref(null)
@@ -46,6 +46,7 @@ const currentInterval = ref(props.interval)
 
 // Interval 選項配置
 const intervalOptions = [
+  { value: '1m', label: '1m' },
   { value: '15m', label: '15m' },
   { value: '1h', label: '1h' },
   { value: '1d', label: '1d' },

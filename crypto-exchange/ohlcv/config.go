@@ -13,6 +13,7 @@ type IntervalConfig struct {
 }
 
 var SupportedIntervals = map[OHLCV_INTERVAL]IntervalConfig{
+	M_1:    {Duration: time.Minute, Table: "ohlcv_1min"},
 	MIN_15: {Duration: 15 * time.Minute, Table: "ohlcv_15min"},
 	H_1:    {Duration: time.Hour, Table: "ohlcv_1h"},
 	D_1:    {Duration: 24 * time.Hour, Table: "ohlcv_1d"},

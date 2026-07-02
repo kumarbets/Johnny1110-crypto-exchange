@@ -69,6 +69,9 @@ func (s *orderService) PlaceOrder(ctx context.Context, market string, user *dto.
 		return nil, fmt.Errorf("failed to execute order placement: %w", err)
 	}
 
+	utils.IncOrdersPlaced()                          // system-wide orders counter
+	utils.AddTrades(int64(len(orderCtx.Trades)))     // system-wide trades counter
+
 	return serviceHelper.WrapPlaceOrderResult(orderCtx.OrderDTO, orderCtx.Trades), nil
 }
 

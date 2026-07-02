@@ -14,8 +14,27 @@
         <h3>Order Book</h3>
 
         <div class="ops-badge">
-          &#9889; ORDERS / SEC: <span class="ops-value">{{ ordersPerSec }}</span>
-          <div class="ops-sub">this account &middot; live</div>
+          <div class="ops-row">
+            <div class="ops-metric">
+              <div class="ops-value">{{ ordersPerSec }}</div>
+              <div class="ops-label">&#9889; orders / sec</div>
+            </div>
+            <div class="ops-metric">
+              <div class="ops-value">{{ tradesPerSec }}</div>
+              <div class="ops-label">&#128176; trades / sec</div>
+            </div>
+          </div>
+          <div class="ops-row">
+            <div class="ops-metric">
+              <div class="ops-value ops-small">{{ fmtNum(systemOrdersTotal) }}</div>
+              <div class="ops-label">total orders</div>
+            </div>
+            <div class="ops-metric">
+              <div class="ops-value ops-small">{{ fmtNum(systemTradesTotal) }}</div>
+              <div class="ops-label">total trades</div>
+            </div>
+          </div>
+          <div class="ops-sub">system &middot; all users &middot; live</div>
         </div>
 
         <h4>Asks</h4>
@@ -305,14 +324,18 @@ export default {
   },
   data() {
     return {
-      chartInterval: "15m",
+      chartInterval: "1m",
       latestPrice: 0.0,
       openOrders: [],
       orderHistory: [],
       ordersPerSec: 0,
+      tradesPerSec: 0,
       openTotal: 0,
       closedTotal: 0,
+      systemOrdersTotal: 0,
+      systemTradesTotal: 0,
       opsLastCount: null,
+      tpsLastCount: null,
       opsLastTs: null,
       obUnsub: null,
       userUnsub: null,
@@ -604,6 +627,8 @@ export default {
       this.orderHistory = data.closed_orders || []
       this.openTotal = data.open_total || 0
       this.closedTotal = data.closed_total || 0
+      if (typeof data.system_orders_total === 'number') this.systemOrdersTotal = data.system_orders_total
+      if (typeof data.system_trades_total === 'number') this.systemTradesTotal = data.system_trades_total
       if (Array.isArray(data.balances)) {
         this.balances = data.balances
         const base = data.balances.find(b => b.asset === this.baseAsset)
@@ -716,18 +741,26 @@ export default {
       }
     },
 
-    // Orders never get deleted (cancel = status change), so the account's total
-    // order count is monotonic. Sampling it each second gives a real orders/sec rate.
+    // system_orders_total / system_trades_total are process-wide monotonic counters
+    // across ALL users. Sampling each second gives real system-level orders/sec + trades/sec.
     updateOrdersPerSec() {
       const now = Date.now()
-      const count = (this.openTotal || 0) + (this.closedTotal || 0)
+      const oCount = this.systemOrdersTotal || 0
+      const tCount = this.systemTradesTotal || 0
       if (this.opsLastTs !== null && now > this.opsLastTs) {
         const dt = (now - this.opsLastTs) / 1000
-        const rate = (count - this.opsLastCount) / dt
-        if (rate >= 0 && isFinite(rate)) this.ordersPerSec = Math.round(rate)
+        const oRate = (oCount - this.opsLastCount) / dt
+        const tRate = (tCount - this.tpsLastCount) / dt
+        if (oRate >= 0 && isFinite(oRate)) this.ordersPerSec = Math.round(oRate)
+        if (tRate >= 0 && isFinite(tRate)) this.tradesPerSec = Math.round(tRate)
       }
       this.opsLastTs = now
-      this.opsLastCount = count
+      this.opsLastCount = oCount
+      this.tpsLastCount = tCount
+    },
+
+    fmtNum(n) {
+      return (n || 0).toLocaleString()
     },
     changePlaceOrderBtn(btnName) {
       this.placeOrderBtn = btnName;
@@ -848,21 +881,38 @@ body {
   background: linear-gradient(180deg, #1a0033, #330066);
   color: #00ffcc;
   font-weight: bold;
-  letter-spacing: 1px;
   box-shadow: 0 0 12px rgba(0,255,204,0.5);
 }
+.ops-badge .ops-row {
+  display: flex;
+  justify-content: space-around;
+  gap: 8px;
+  margin: 2px 0;
+}
+.ops-badge .ops-metric { flex: 1; }
 .ops-badge .ops-value {
-  font-size: 26px;
+  font-size: 24px;
   color: #ffff66;
   text-shadow: 0 0 8px rgba(255,255,102,0.8);
-  margin-left: 6px;
+  line-height: 1.1;
 }
-.ops-badge .ops-sub {
+.ops-badge .ops-value.ops-small {
+  font-size: 15px;
+  color: #66ffcc;
+  text-shadow: none;
+}
+.ops-badge .ops-label {
   font-size: 9px;
   color: #99ffe6;
   letter-spacing: 0;
-  margin-top: 2px;
-  opacity: 0.85;
+  margin-top: 1px;
+}
+.ops-badge .ops-sub {
+  font-size: 8px;
+  color: #99ffe6;
+  letter-spacing: 0;
+  margin-top: 4px;
+  opacity: 0.7;
 }
 
 .orderbook-container h4 {

@@ -246,6 +246,7 @@
   <li><a href="#d5">D.5 &mdash; Go &amp; database concepts these changes teach</a></li>
   <li><a href="#d6">D.6 &mdash; WebSocket-first data flow (public + private channels)</a></li>
   <li><a href="#d7">D.7 &mdash; Hosting the whole stack on one VM</a></li>
+  <li><a href="#d8">D.8 &mdash; Live system metrics, 1m candles, a DB viewer &amp; the load fleet</a></li>
 </ol>
 </details>
 
@@ -1489,7 +1490,29 @@ case ws.USER_DATA:
 </ul>
 <p>Open <code>http://&lt;VM_IP&gt;/markets/BTC-USDT</code> and the page talks to the same box for REST, WS, and static assets. The static server is external tooling (like the load generator) &mdash; not part of the application module, so the repo stays clean.</p>
 
-<p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents the changes made in this working copy &mdash; SQLite WAL tuning (<code>db.go</code>); a WebSocket-first data flow with a new private <code>user_data</code> channel (<code>ws/model.go</code>, <code>scheduler/ws_data_feeder.go</code>, <code>container/container.go</code>, front-end <code>websocketService.js</code> + <code>MarketOrderBook.vue</code>); and the measured throughput behind them. License of the original project: non-commercial use only.</p>
+<h2 id="d8">D.8 &mdash; Live system metrics, 1m candles, a DB viewer &amp; the load fleet</h2>
+<p>A few more demo affordances, all built the same minimal way (tiny counters in a leaf package, tiny standalone tools outside the app module):</p>
+
+<h3>System-level orders/sec &amp; trades/sec (not per-account)</h3>
+<p>Two process-wide monotonic counters live in the leaf <code>utils</code> package so both the order service (writer) and the WS feeder (reader) can share them with no import cycle:</p>
+<pre><code>// utils/counter.go
+var ordersPlacedTotal, tradesTotal int64
+func IncOrdersPlaced()  { atomic.AddInt64(&amp;ordersPlacedTotal, 1) }
+func AddTrades(n int64) { atomic.AddInt64(&amp;tradesTotal, n) }
+// ... plus Get/Set (Set seeds them from the DB at startup)</code></pre>
+<p><code>PlaceOrder</code> calls <code>utils.IncOrdersPlaced()</code> and <code>utils.AddTrades(len(trades))</code>; <code>initDB</code> seeds both from <code>SELECT COUNT(*)</code> so the UI shows <em>true historical totals</em> (e.g. ~970k orders / ~400k trades) that then grow live. The feeder adds them to the private <code>user_data</code> push, and the front-end badge samples the delta each second &mdash; giving four numbers in one badge: <strong>orders/sec, trades/sec, total orders, total trades</strong>, system-wide across all users. (The rate is the delta of a monotonic counter; the totals are the counter values.)</p>
+
+<h3>1-minute candles as the default</h3>
+<p>The aggregator already supported a family of intervals; adding 1m was one line in <code>SupportedIntervals</code> (<code>M_1: {Duration: time.Minute, Table: "ohlcv_1min"}</code>) plus an idempotent <code>CREATE TABLE IF NOT EXISTS ohlcv_1min</code> in <code>initDB</code> that mirrors the seeded <code>ohlcv_15min</code> shape (a small migration drops an earlier wrong-shaped table). On the front-end, <code>1m</code> was added to the interval buttons and set as the default. The forming 1m candle streams over the <code>ohlcv</code> WS channel; closed bars land in <code>ohlcv_1min</code> each minute.</p>
+
+<h3>A read-only DB viewer</h3>
+<p>To inspect tables and rows there is a ~90-line standalone Go web app (its own module, not part of the exchange) that opens <code>exg.db</code> <strong>read-only</strong> (<code>?mode=ro&amp;_pragma=query_only(true)</code>, WAL-safe alongside the live writer), lists every table with a row count, shows the latest 200 rows of any table, and runs ad-hoc <code>SELECT</code>s (non-SELECT is rejected). It runs under <code>systemd</code> on <code>:8090</code>.</p>
+
+<h3>The load fleet</h3>
+<p>The traffic comes from the load generator (Part&nbsp;D.4) run as five <code>systemd</code> units, one per user, with <code>Restart=always</code> so trading runs continuously. Each generator mixes <strong>limit and market orders</strong> (<code>-mktpct 25</code>) in a tight price band, so the book churns and a large fraction of orders match &mdash; producing the steady stream of trades the UI shows.</p>
+<div class="note"><strong>The running demo (single VM, all under systemd):</strong> <code>exg</code> (backend, <code>:8080</code> REST / <code>:8081</code> WS) &middot; <code>fe</code> (frontend SPA, <code>:80</code>) &middot; <code>dbviewer</code> (<code>:8090</code>) &middot; <code>gen1..gen5</code> (continuous mixed traffic). Open <code>http://&lt;VM&gt;/markets/BTC-USDT</code>, log in, and watch the four-metric badge, the 1m chart, the live order book and your own orders/trades &mdash; all over one WebSocket.</div>
+
+<p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents the changes made in this working copy &mdash; SQLite WAL tuning; a WebSocket-first data flow with a private <code>user_data</code> channel; system-level orders/trades counters; a 1-minute OHLCV interval; a read-only DB viewer; and the measured throughput behind them. License of the original project: non-commercial use only.</p>
 
 </div>
 </body>

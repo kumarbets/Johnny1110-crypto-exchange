@@ -6,6 +6,7 @@ import (
 	"github.com/johnny1110/crypto-exchange/ohlcv"
 	"github.com/johnny1110/crypto-exchange/security"
 	"github.com/johnny1110/crypto-exchange/service"
+	"github.com/johnny1110/crypto-exchange/utils"
 	"github.com/johnny1110/crypto-exchange/ws"
 	"github.com/labstack/gommon/log"
 	"time"
@@ -118,11 +119,13 @@ func (W *WSDataFeederJob) collectAndSend(key ws.SubscriptionKey) {
 		}
 		balances, _ := W.balanceService.GetBalances(ctx, user.ID)
 		W.wsHub.BroadcastToSubscribers(key, map[string]interface{}{
-			"open_orders":   openResp.Result,
-			"open_total":    openResp.Total,
-			"closed_orders": closedResp.Result,
-			"closed_total":  closedResp.Total,
-			"balances":      balances,
+			"open_orders":         openResp.Result,
+			"open_total":          openResp.Total,
+			"closed_orders":       closedResp.Result,
+			"closed_total":        closedResp.Total,
+			"balances":            balances,
+			"system_orders_total": utils.GetOrdersPlaced(), // monotonic, all users -> live orders/sec + total
+			"system_trades_total": utils.GetTradesTotal(),  // monotonic, all users -> live trades/sec + total
 		})
 		return
 	default:
