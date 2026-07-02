@@ -33,6 +33,15 @@ func (c AdminController) TestMakeMarket(context *gin.Context) {
 	return
 }
 
+// Reset wipes all trading state, re-funds the demo users and clears the engine.
+func (c AdminController) Reset(context *gin.Context) {
+	if err := c.adminService.ResetExchange(context.Request.Context()); err != nil {
+		context.JSON(http.StatusBadRequest, HandleCodeError(INVALID_PARAMS, err))
+		return
+	}
+	context.JSON(http.StatusOK, HandleSuccess(nil))
+}
+
 func NewAdminController(adminService service.IAdminService) *AdminController {
 	return &AdminController{
 		adminService: adminService,

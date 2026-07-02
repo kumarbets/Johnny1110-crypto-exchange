@@ -45,6 +45,7 @@ type IOrderService interface {
 type IAdminService interface {
 	Settlement(ctx context.Context, req dto.SettlementReq) error
 	TestAutoMakeMarket(ctx context.Context) error
+	ResetExchange(ctx context.Context) error
 }
 
 // Auto Market Maker (AMM) etc. >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

@@ -36,6 +36,11 @@
           </div>
           <div class="ops-sub">system &middot; all users &middot; live</div>
         </div>
+        <div class="sim-controls">
+          <button class="sim-btn start" @click="simStart" :disabled="simRunning">&#9654; START</button>
+          <button class="sim-btn stop" @click="simStop" :disabled="!simRunning">&#9209; STOP</button>
+          <button class="sim-btn reset" @click="simReset">&#8635; RESET</button>
+        </div>
 
         <h4>Asks</h4>
         <table class="orderbook-table ask">
@@ -339,7 +344,9 @@ export default {
       opsLastTs: null,
       obUnsub: null,
       userUnsub: null,
+      sysUnsub: null,
       refreshInterval: null,
+      simRunning: false,
       orderType: 'limit',
       market: "",
       placeOrderBtn: "Buy",
@@ -389,6 +396,7 @@ export default {
     await this.fetchClosedOrders()
     await this.fetchBalances()
     this.startAutoRefresh()
+    this.simCheck()
     const baseAsset = 'ETH'; // Example dynamic data
     const quoteAsset = 'USD'; // Example dynamic data
     this.cmdOutputList.push(`C:\\CryptoEx> trading ${baseAsset}/${quoteAsset}
@@ -419,6 +427,7 @@ export default {
     // tear down WS subscriptions
     if (this.obUnsub) { this.obUnsub(); this.obUnsub = null }
     if (this.userUnsub) { this.userUnsub(); this.userUnsub = null }
+    if (this.sysUnsub) { this.sysUnsub(); this.sysUnsub = null }
   },
   methods: {
 
@@ -627,8 +636,7 @@ export default {
       this.orderHistory = data.closed_orders || []
       this.openTotal = data.open_total || 0
       this.closedTotal = data.closed_total || 0
-      if (typeof data.system_orders_total === 'number') this.systemOrdersTotal = data.system_orders_total
-      if (typeof data.system_trades_total === 'number') this.systemTradesTotal = data.system_trades_total
+      // system-wide counters come from the public 'sysstats' channel (badge works without login)
       if (Array.isArray(data.balances)) {
         this.balances = data.balances
         const base = data.balances.find(b => b.asset === this.baseAsset)
@@ -636,7 +644,6 @@ export default {
         if (base) this.baseBalance = base.available
         if (quote) this.quoteBalance = quote.available
       }
-      this.updateOrdersPerSec()
     },
 
     async handlePriceUpdate(data) {
@@ -736,6 +743,12 @@ export default {
         return
       }
       this.obUnsub = websocketService.subscribeOrderbook(this.market, (data) => this.applyOrderBookData(data))
+      // public system-wide badge counters (works with or without login)
+      this.sysUnsub = websocketService.subscribeSysStats((data) => {
+        if (typeof data.system_orders_total === 'number') this.systemOrdersTotal = data.system_orders_total
+        if (typeof data.system_trades_total === 'number') this.systemTradesTotal = data.system_trades_total
+        this.updateOrdersPerSec()
+      })
       if (authUtils.isAuthenticated()) {
         this.userUnsub = websocketService.subscribeUserData(authUtils.getToken(), this.market, (data) => this.applyUserData(data))
       }
@@ -761,6 +774,28 @@ export default {
 
     fmtNum(n) {
       return (n || 0).toLocaleString()
+    },
+
+    // --- order-simulation controls (talk to the simctl service on :8091) ---
+    simUrl(path) {
+      return `http://${window.location.hostname}:8091/${path}`
+    },
+    async simStart() {
+      try { await fetch(this.simUrl('start'), { method: 'POST' }); this.simRunning = true }
+      catch (e) { console.error('sim start failed', e) }
+    },
+    async simStop() {
+      try { await fetch(this.simUrl('stop'), { method: 'POST' }); this.simRunning = false }
+      catch (e) { console.error('sim stop failed', e) }
+    },
+    async simReset() {
+      if (!window.confirm('RESET will DELETE all orders & trades, re-fund users and clear the book. Continue?')) return
+      try { await fetch(this.simUrl('reset'), { method: 'POST' }); this.simRunning = false }
+      catch (e) { console.error('sim reset failed', e) }
+    },
+    async simCheck() {
+      try { const r = await fetch(this.simUrl('status')); const j = await r.json(); this.simRunning = !!j.running }
+      catch (e) { /* control service unreachable */ }
     },
     changePlaceOrderBtn(btnName) {
       this.placeOrderBtn = btnName;
@@ -914,6 +949,27 @@ body {
   margin-top: 4px;
   opacity: 0.7;
 }
+.sim-controls {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 12px;
+}
+.sim-btn {
+  flex: 1;
+  padding: 9px 4px;
+  border: 0;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  color: #fff;
+  letter-spacing: 1px;
+}
+.sim-btn.start { background: #1f8b3a; }
+.sim-btn.stop  { background: #b22222; }
+.sim-btn.reset { background: #cc6600; }
+.sim-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .orderbook-container h4 {
   font-size: 11px;

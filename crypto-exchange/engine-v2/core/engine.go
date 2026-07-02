@@ -13,6 +13,7 @@ import (
 type MatchingEngine struct {
 	mu         sync.RWMutex
 	orderbooks map[string]*book.OrderBook
+	markets    []*market.MarketInfo
 }
 
 func NewMatchingEngine(markets []*market.MarketInfo) (*MatchingEngine, error) {
@@ -21,11 +22,24 @@ func NewMatchingEngine(markets []*market.MarketInfo) (*MatchingEngine, error) {
 	}
 	e := &MatchingEngine{
 		orderbooks: make(map[string]*book.OrderBook, len(markets)),
+		markets:    markets,
 	}
 	for _, m := range markets {
 		e.orderbooks[m.Name] = book.NewOrderBook(m)
 	}
 	return e, nil
+}
+
+// Reset discards all in-memory order books and recreates them empty. Used by the
+// admin reset endpoint after the orders/trades tables are cleared, so the engine
+// and DB start from the same blank slate.
+func (e *MatchingEngine) Reset() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.orderbooks = make(map[string]*book.OrderBook, len(e.markets))
+	for _, m := range e.markets {
+		e.orderbooks[m.Name] = book.NewOrderBook(m)
+	}
 }
 
 func (e *MatchingEngine) GetOrderBook(market string) (*book.OrderBook, error) {

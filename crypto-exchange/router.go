@@ -86,5 +86,6 @@ func setupRoutes(
 	{
 		admin.POST("/manual-adjustment", adminController.ManualAdjustment)
 		admin.POST("/test-make-market", adminController.TestMakeMarket)
+		admin.POST("/reset", adminController.Reset)
 	}
 }

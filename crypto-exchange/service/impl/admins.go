@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/johnny1110/crypto-exchange/dto"
+	"github.com/johnny1110/crypto-exchange/engine-v2/core"
 	"github.com/johnny1110/crypto-exchange/engine-v2/model"
 	"github.com/johnny1110/crypto-exchange/repository"
 	"github.com/johnny1110/crypto-exchange/service"
+	"github.com/johnny1110/crypto-exchange/utils"
 )
 
 type adminService struct {
@@ -15,18 +17,52 @@ type adminService struct {
 	userRepo     repository.IUserRepository
 	balanceRepo  repository.IBalanceRepository
 	orderService service.IOrderService
+	engine       *core.MatchingEngine
 }
 
 func NewIAdminService(db *sql.DB,
 	userRepo repository.IUserRepository,
 	balanceRepo repository.IBalanceRepository,
-	orderService service.IOrderService) service.IAdminService {
+	orderService service.IOrderService,
+	engine *core.MatchingEngine) service.IAdminService {
 	return &adminService{
 		db:           db,
 		userRepo:     userRepo,
 		balanceRepo:  balanceRepo,
 		orderService: orderService,
+		engine:       engine,
 	}
+}
+
+// ResetExchange wipes all trading state (orders, trades, ohlcv), zeroes balances,
+// re-funds the demo users, resets the in-memory engine + counters. Ready for a
+// fresh Start. Live: no restart, so tokens and WebSocket connections stay valid.
+func (as adminService) ResetExchange(ctx context.Context) error {
+	err := WithTx(ctx, as.db, func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`DELETE FROM orders`,
+			`DELETE FROM trades`,
+			`UPDATE balances SET available = 0, locked = 0`,
+			`UPDATE balances SET available = 1000000      WHERE asset = 'BTC'  AND user_id IN (SELECT id FROM users WHERE username LIKE 'user%@gmail.com')`,
+			`UPDATE balances SET available = 100000000000 WHERE asset = 'USDT' AND user_id IN (SELECT id FROM users WHERE username LIKE 'user%@gmail.com')`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	// best-effort clear candlestick tables (names vary; ignore missing ones)
+	for _, t := range []string{"ohlcv_1min", "ohlcv_15min", "ohlcv_1h", "ohlcv_1d", "ohlcv_1w", "ohlcv_realtime", "ohlcv_statistics"} {
+		as.db.Exec("DELETE FROM " + t)
+	}
+	as.engine.Reset()        // empty the in-memory order books
+	utils.SetOrdersPlaced(0)  // reset system counters
+	utils.SetTradesTotal(0)
+	return nil
 }
 
 func (as adminService) Settlement(ctx context.Context, req dto.SettlementReq) error {

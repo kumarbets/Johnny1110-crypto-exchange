@@ -3,7 +3,8 @@ import axios from 'axios'
 import {authUtils} from "@/services/auth";
 
 //const BASE_URL = 'http://localhost:8080'
-const BASE_URL = 'http://66.94.113.205:8080'
+// Point at whatever host serves the page (works on any machine, no rebuild needed)
+const BASE_URL = 'http://' + window.location.hostname + ':8080'
 
 const apiClient = axios.create({
     baseURL: BASE_URL,

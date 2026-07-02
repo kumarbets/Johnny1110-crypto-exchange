@@ -12,7 +12,7 @@ class WebSocketService {
         // WebSocket 端點配置
         this.endpoints = {
             local: 'ws://localhost:8081/ws',
-            remote: 'ws://66.94.113.205:8081/ws'
+            remote: 'ws://' + window.location.hostname + ':8081/ws'
         }
         this.currentEndpoint = this.endpoints.remote // 預設使用 remote
     }
@@ -372,6 +372,25 @@ class WebSocketService {
         console.log('subscribe user_data')
 
         return () => this.unsubscribeUserData(token, market, callback)
+    }
+
+    /**
+     * 訂閱 public system stats (orders/trades totals) — no login required
+     * @param {Function} callback
+     */
+    subscribeSysStats(callback) {
+        if (!this.subscribers.has('sysstats')) {
+            this.subscribers.set('sysstats', [])
+        }
+        this.subscribers.get('sysstats').push(callback)
+        this.sendMessage({ action: 'subscribe', channel: 'sysstats' })
+        console.log('subscribe sysstats')
+        return () => {
+            const subs = this.subscribers.get('sysstats') || []
+            const i = subs.indexOf(callback)
+            if (i > -1) subs.splice(i, 1)
+            this.sendMessage({ action: 'unsubscribe', channel: 'sysstats' })
+        }
     }
 
     unsubscribeUserData(token, market, callback) {

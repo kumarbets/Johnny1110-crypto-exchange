@@ -66,6 +66,12 @@ func (W *WSDataFeederJob) collectAndSend(key ws.SubscriptionKey) {
 	ctx := context.Background()
 
 	switch key.Channel {
+	case ws.SYSSTATS:
+		// public: system-wide counters so the live badge works without login
+		W.wsHub.BroadcastToSubscribers(key, map[string]interface{}{
+			"system_orders_total": utils.GetOrdersPlaced(),
+			"system_trades_total": utils.GetTradesTotal(),
+		})
 	case ws.MARKETS:
 		data, err := W.marketDataService.GetAllMarketData()
 		if err != nil {

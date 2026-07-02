@@ -11,6 +11,7 @@ const OHLCV = WSChannel("ohlcv")
 const ORDERBOOK = WSChannel("orderbook")
 const MARKETS = WSChannel("markets")
 const USER_DATA = WSChannel("user_data") // private: per-user open orders + trade history + balances
+const SYSSTATS = WSChannel("sysstats")   // public: system-wide orders/trades totals (for the live badge, no login)
 
 type WSAction string
 
@@ -62,7 +63,7 @@ func BuildSubscriptionKey(req WSReq) (SubscriptionKey, error) {
 	}
 
 	switch req.Channel {
-	case MARKETS:
+	case MARKETS, SYSSTATS:
 		return SubscriptionKey{
 			Channel: req.Channel,
 		}, nil
