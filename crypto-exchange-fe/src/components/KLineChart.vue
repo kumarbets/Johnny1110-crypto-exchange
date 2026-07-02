@@ -256,9 +256,14 @@ function handleRealtimeData(data, timestamp) {
 
     console.log('更新即時數據:', { latestCandle, latestVolume, timestamp })
 
-    // 更新圖表數據
-    candleSeries.value.update(latestCandle)
-    volumeSeries.value.update(latestVolume)
+    // 更新圖表數據 (guard: the chart may have been disposed between the WS
+    // callback firing and this line, e.g. on unmount / hot-reload)
+    try {
+      candleSeries.value.update(latestCandle)
+      volumeSeries.value.update(latestVolume)
+    } catch (e) {
+      // chart was disposed mid-flight; ignore this tick
+    }
   }
 }
 
@@ -308,16 +313,18 @@ onMounted(async () => {
 
 // 組件卸載時清理資源
 onUnmounted(() => {
-  // 清理圖表
-  if (chart.value) {
-    chart.value.remove()
-  }
-
-  // 清理 WebSocket 訂閱
+  // 1. Unsubscribe FIRST so no realtime tick lands on a chart we're about to remove
   cleanupWebSocket()
 
-  // 斷開 WebSocket 連線（如果需要的話）
-  // websocketService.disconnect()
+  // 2. Remove the chart, then null every ref so any late callback/repaint
+  //    short-circuits its `if (!candleSeries.value) return` guard instead of
+  //    painting a disposed object ("Object is disposed").
+  if (chart.value) {
+    try { chart.value.remove() } catch (e) { /* already disposed */ }
+  }
+  chart.value = null
+  candleSeries.value = null
+  volumeSeries.value = null
 })
 
 // 監聽 props 變化
