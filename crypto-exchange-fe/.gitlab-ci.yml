@@ -1,0 +1,67 @@
+stages:
+  - install
+  - test
+  - build
+  - deploy
+
+
+.base-job-config: # 基底 job 可提供所有 job 繼承使用
+  only:
+    - main # 僅限 main 分支才做
+  image: node # 各 job 基底 image
+  tags:
+    - crypto-runner
+  before_script:
+    - ls
+  cache:
+    key: $CI_COMMIT_BRANCH
+    paths:
+      - node_modules
+  interruptible: true # 如果有新的流水線產生，馬上中斷
+
+#install
+install_job:
+  stage: install
+  extends: [.base-job-config]
+  script:
+    - npm install # install sdk
+
+#test
+lint_code_style:
+  stage: test
+  extends: [.base-job-config]
+  script:
+    - npm run lint # check lint
+  allow_failure: true
+  cache:
+    policy: pull
+
+#build
+build_job:
+  stage: build
+  extends: [.base-job-config]
+  script:
+    - npm run build # build to dist
+  artifacts:
+    paths:
+      - dist/
+    exclude:
+      - bin/**/*.o # exclude all bin folder's *.0
+    expire_in: 1 week # expire in 1 week
+    name: "crypto-exchange-fe"
+  cache:
+    policy: pull
+
+#deploy
+deploy_job:
+  stage: deploy
+  extends: [.base-job-config]
+  cache: []
+  variables:
+    IMAGE_NAME: "crypto-exchange-fe"
+    APP_CONTAINER_NAME: "crypto-exchange-fe"
+  image: docker
+  script:
+    - docker build -t $IMAGE_NAME .
+    - if [ "$(docker ps -aq --filter name=$APP_CONTAINER_NAME)" ]; then docker rm -f $APP_CONTAINER_NAME; fi
+    - docker run -d -p 5000:8080 --net=frizo-net --name $APP_CONTAINER_NAME $IMAGE_NAME
