@@ -13,6 +13,11 @@
       <div class="orderbook-container">
         <h3>Order Book</h3>
 
+        <div class="ops-badge">
+          &#9889; ORDERS / SEC: <span class="ops-value">{{ ordersPerSec }}</span>
+          <div class="ops-sub">this account &middot; live</div>
+        </div>
+
         <h4>Asks</h4>
         <table class="orderbook-table ask">
           <thead>
@@ -303,6 +308,11 @@ export default {
       latestPrice: 0.0,
       openOrders: [],
       orderHistory: [],
+      ordersPerSec: 0,
+      openTotal: 0,
+      closedTotal: 0,
+      opsLastCount: null,
+      opsLastTs: null,
       orderType: 'limit',
       market: "",
       placeOrderBtn: "Buy",
@@ -418,6 +428,7 @@ export default {
 
         if (response.data.code === '0000000') {
           this.openOrders = response.data.data.result
+          this.openTotal = response.data.data.total || 0
           console.log(this.openOrders)
         } else {
           throw new Error(response.data.message || 'Failed to fetch open orders')
@@ -441,6 +452,8 @@ export default {
 
         if (response.data.code === '0000000') {
           this.orderHistory = response.data.data.result
+          this.closedTotal = response.data.data.total || 0
+          this.updateOrdersPerSec()
           console.log(this.orderHistory)
         } else {
           throw new Error(response.data.message || 'Failed to fetch open orders')
@@ -672,7 +685,27 @@ export default {
       this.refreshInterval = setInterval(() => {
         //this.fetchBalances()
         this.fetchOrderBook()
-      }, 1000) // 每5秒更新一次
+        // also refresh the logged-in user's open orders + trade history live
+        if (authUtils.isAuthenticated()) {
+          this.fetchOpenOrders()
+          this.fetchClosedOrders() // this also recomputes ordersPerSec
+          this.fetchBalances()
+        }
+      }, 1000) // refresh every 1s
+    },
+
+    // Orders never get deleted (cancel = status change), so the account's total
+    // order count is monotonic. Sampling it each second gives a real orders/sec rate.
+    updateOrdersPerSec() {
+      const now = Date.now()
+      const count = (this.openTotal || 0) + (this.closedTotal || 0)
+      if (this.opsLastTs !== null && now > this.opsLastTs) {
+        const dt = (now - this.opsLastTs) / 1000
+        const rate = (count - this.opsLastCount) / dt
+        if (rate >= 0 && isFinite(rate)) this.ordersPerSec = Math.round(rate)
+      }
+      this.opsLastTs = now
+      this.opsLastCount = count
     },
     changePlaceOrderBtn(btnName) {
       this.placeOrderBtn = btnName;
@@ -783,6 +816,31 @@ body {
   margin: 5px 0;
   color: #ffccff;
   text-shadow: 1px 1px #330033;
+}
+.ops-badge {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  text-align: center;
+  border: 3px solid #00ffcc;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #1a0033, #330066);
+  color: #00ffcc;
+  font-weight: bold;
+  letter-spacing: 1px;
+  box-shadow: 0 0 12px rgba(0,255,204,0.5);
+}
+.ops-badge .ops-value {
+  font-size: 26px;
+  color: #ffff66;
+  text-shadow: 0 0 8px rgba(255,255,102,0.8);
+  margin-left: 6px;
+}
+.ops-badge .ops-sub {
+  font-size: 9px;
+  color: #99ffe6;
+  letter-spacing: 0;
+  margin-top: 2px;
+  opacity: 0.85;
 }
 
 .orderbook-container h4 {

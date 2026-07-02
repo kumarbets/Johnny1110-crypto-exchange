@@ -208,6 +208,7 @@
   <li><a href="#a17">A.17 &mdash; HTTP with Gin &amp; the third-party libraries used</a></li>
   <li><a href="#a18">A.18 &mdash; Tooling cheat-sheet + how to read Go fast</a></li>
   <li><a href="#a19">A.19 &mdash; Five more idioms you'll see (defer, context, blank import, ticker, embedding)</a></li>
+  <li><a href="#a20">A.20 &mdash; The four Go design patterns this codebase leans on</a></li>
 </ol>
 <strong>Part B &mdash; Build the exchange backend</strong>
 <ol start="19">
@@ -235,6 +236,14 @@
   <li><a href="#c3">C.3 &mdash; Test methods (unit, benchmark, curl walkthrough)</a></li>
   <li><a href="#c4">C.4 &mdash; Live demo: backend on a test VM, front-end on your laptop</a></li>
   <li><a href="#c5">C.5 &mdash; API &amp; WebSocket reference</a></li>
+</ol>
+<strong>Part D &mdash; What we changed in the working repo &amp; the throughput story</strong>
+<ol start="40">
+  <li><a href="#d1">D.1 &mdash; Every change we made to the original repo (and why)</a></li>
+  <li><a href="#d2">D.2 &mdash; The throughput story: 60 &rarr; 628 orders/sec, and why not 5000</a></li>
+  <li><a href="#d3">D.3 &mdash; Making live high-frequency trading visible in the UI</a></li>
+  <li><a href="#d4">D.4 &mdash; The load-test harness &amp; the 5-user HFT demo (how to log in)</a></li>
+  <li><a href="#d5">D.5 &mdash; Go &amp; database concepts these changes teach</a></li>
 </ol>
 </details>
 
@@ -531,6 +540,38 @@ func WithTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) error {
     if err := fn(tx); err != nil { return err }   // fn does the real work
     return tx.Commit()
 }</code></pre>
+
+<h2 id="a20">A.20 &mdash; The four Go design patterns this codebase leans on</h2>
+<p>Recognising these four makes the whole codebase readable &mdash; they recur in almost every package.</p>
+
+<h3>1. Constructor returns an interface</h3>
+<p>Every layer exposes a <code>New&hellip;</code> function that returns an <em>interface</em>, hiding the concrete struct. Callers depend on the contract, never the implementation &mdash; that is what makes the layers swappable and testable.</p>
+<pre><code>func NewIOrderService(db *sql.DB, engine *core.MatchingEngine, /* repos&hellip; */) service.IOrderService {
+    return &amp;orderService{ db: db, engine: engine, /* &hellip; */ }   // returns the INTERFACE
+}</code></pre>
+
+<h3>2. Builder (fluent construction)</h3>
+<p>A DTO with many fields is assembled step-by-step with chained methods, ending in <code>Build()</code>. Reads like a sentence and avoids a 12-argument constructor. Used for orders.</p>
+<pre><code>order := dto.NewOrderBuilder().
+    Market("BTC-USDT").User(userID).Side(model.BID).
+    Price(65000).Size(0.5).Mode(model.MAKER).
+    Build()</code></pre>
+
+<h3>3. Strategy (behaviour chosen at runtime)</h3>
+<p>Instead of a big <code>if orderType == LIMIT &hellip; else &hellip;</code>, the service picks a <em>strategy object</em> that knows how to place that kind of order. Adding a new order type means adding a struct, not editing a switch.</p>
+<pre><code>type OrderPlacementStrategy interface {
+    Execute(ctx, service, orderCtx) error
+}
+// LimitOrderStrategy and MarketOrderStrategy each implement Execute();
+// getOrderPlacementStrategy(req) returns the right one.</code></pre>
+
+<h3>4. Closure callback (a function is a first-class value)</h3>
+<p>The transaction helper takes <em>your code</em> as a function argument and runs it inside a begin/commit/rollback envelope. You never write transaction boilerplate again &mdash; the pattern owns commit-on-success, rollback-on-error.</p>
+<pre><code>WithTx(ctx, s.db, func(tx *sql.Tx) error {   // &lt;-- a function passed as data
+    // &hellip; all your writes here &hellip;
+    return nil                                // nil => commit; non-nil => rollback
+})</code></pre>
+<p>(A fifth, the <strong>Facade</strong>, you already met: <code>MatchingEngine</code> is a thin front over many <code>OrderBook</code>s, giving the rest of the app one simple door to knock on.)</p>
 
 <!-- ============================================================ -->
 <!-- PART B                                                       -->
@@ -1315,7 +1356,101 @@ curl -s -X POST $API/api/v1/orders/BTC-USDT -H "Authorization: $TOKEN" \
 </table>
 <p>All REST responses share the envelope <code>{ "code": "0000000", "message": "success", "timestamp": &lt;ms&gt;, "data": {...} }</code> where <code>code</code> <code>"0000000"</code> means success.</p>
 
-<p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. License of the original project: non-commercial use only.</p>
+<!-- ============================================================ -->
+<!-- PART D                                                       -->
+<!-- ============================================================ -->
+<h1 id="partD">Part D &mdash; What we changed in the working repo &amp; the throughput story</h1>
+<p>The repository is a complete, working exchange. To take it from "boots up" to "shows live high-frequency trading in a browser," we made a <strong>deliberately tiny</strong> set of changes &mdash; two one-file source tweaks plus some external tooling and runtime data. This part lists every change, why it was needed, and the honest performance story behind it.</p>
+
+<h2 id="d1">D.1 &mdash; Every change we made to the original repo</h2>
+<table>
+<tr><th>#</th><th>File</th><th>Change</th><th>Why</th><th>Touches app logic?</th></tr>
+<tr><td>1</td><td><code>crypto-exchange/db.go</code></td><td>Open SQLite with <code>journal_mode=WAL</code>, <code>synchronous=NORMAL</code>, <code>busy_timeout</code> (DSN pragmas only)</td><td>Lift end-to-end order throughput ~10&times; (see D.2). The default full-fsync-per-commit capped it at ~60 orders/sec.</td><td>No &mdash; connection setup only</td></tr>
+<tr><td>2</td><td><code>crypto-exchange-fe/src/components/MarketOrderBook.vue</code></td><td>The 1-second auto-refresh now also refetches the logged-in user's <em>open orders, order history and balances</em> (it previously refreshed only the order book)</td><td>So a logged-in user actually <em>sees</em> their orders appear/fill and trades stream in live (see D.3).</td><td>No &mdash; UI polling only</td></tr>
+<tr><td>3</td><td><code>crypto-exchange-fe/src/services/apiService.js</code> &amp; <code>websocketService.js</code></td><td>Point <code>BASE_URL</code> / WS endpoint at the test VM's IP</td><td>Run the front-end on the laptop against the backend on the VM. (The repo already hard-coded a remote IP here.)</td><td>No &mdash; config value</td></tr>
+</table>
+<div class="note"><strong>Not added to the repo at all:</strong> the load-generator (a small standalone Go program that lives outside the module &mdash; see D.4), the five demo users, and their funding are all <em>runtime</em> artifacts (rows in the VM's SQLite file / an external binary). None of it changes the application's source. We resisted adding any feature code &mdash; the goal was to observe the existing engine under load, not to extend it.</div>
+
+<h2 id="d2">D.2 &mdash; The throughput story: 60 &rarr; 628 orders/sec, and why not 5000</h2>
+<p>The README benchmarks show the matching <em>engine</em> doing <strong>~1&ndash;2.7 million orders/sec</strong> in memory. Yet the first end-to-end run (real HTTP &rarr; service &rarr; SQLite &rarr; settlement) measured only <strong>~60 orders/sec</strong>. That gap is the whole lesson.</p>
+<h3>Where the time actually goes</h3>
+<p>The engine is in-memory (nanoseconds). The cost is <strong>durability</strong>: every order is persisted. With SQLite's defaults (<code>journal_mode=DELETE</code>, <code>synchronous=FULL</code>) <em>every commit performs an <code>fsync()</code></em> &mdash; a physical flush to disk. Worse, an order that trades writes in two phases, and the settlement phase issues several auto-commit statements, so a single order can trigger multiple fsyncs. On the VM's disk an fsync is ~8&nbsp;ms, so ~2 fsyncs/order &asymp; 16&nbsp;ms &asymp; ~60 orders/sec. <strong>The bottleneck was the disk, not the code.</strong></p>
+<h3>The fix: WAL + synchronous=NORMAL</h3>
+<pre><code>// crypto-exchange/db.go  — the one line that mattered
+dsn := "file:/app/exg.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+db, err := sql.Open("sqlite3", dsn)</code></pre>
+<ul>
+  <li><strong>WAL (Write-Ahead Logging):</strong> commits append to a <code>-wal</code> side-file instead of rewriting the main DB; readers never block the writer.</li>
+  <li><strong><code>synchronous=NORMAL</code>:</strong> stops fsync-ing on every commit &mdash; it only fsyncs at a periodic <em>checkpoint</em>. This is the big win. (Trade-off: a crash at the wrong instant can lose the last few commits &mdash; acceptable for a demo, tunable for production.)</li>
+</ul>
+<p>Result: <strong>~628 orders/sec</strong> &mdash; a clean 10&times;, verified with a 20,000-order load test.</p>
+<h3>Why a connection pool made it <em>worse</em> (the instructive failure)</h3>
+<p>The obvious next idea &mdash; "use many DB connections to go parallel" &mdash; we tried, with <code>MaxOpenConns(12)</code> and <code>BEGIN IMMEDIATE</code>. It measured <strong>slower (~366/sec)</strong> with zero errors. The reason is fundamental: <strong>SQLite is a single-writer database.</strong> Only one write transaction commits at a time; twelve connections just queue on the same write lock and add contention. We reverted to a single connection.</p>
+<table>
+<tr><th>Configuration</th><th>Orders/sec (end-to-end, on the VM)</th></tr>
+<tr><td>In-memory engine only (benchmark, no persistence)</td><td>~1,000,000&ndash;2,700,000</td></tr>
+<tr><td>Original: SQLite <code>synchronous=FULL</code>, 1 conn</td><td>~60</td></tr>
+<tr><td><strong>WAL + <code>synchronous=NORMAL</code>, 1 conn (kept)</strong></td><td><strong>~628</strong></td></tr>
+<tr><td>WAL + pool of 12 conns + BEGIN IMMEDIATE</td><td>~366 (worse &mdash; write-lock contention)</td></tr>
+</table>
+<div class="warn"><strong>Why we did not force 5,000+ orders/sec.</strong> Getting there is not a tuning knob &mdash; it needs an <em>architectural</em> change to a working repo we were asked to keep intact: e.g. batching many orders per transaction, moving settlement off the request path (async), or replacing single-writer SQLite with a server database (Postgres) or a sharded/append-only design. Each is a real redesign with correctness implications for money. The honest result is: <strong>WAL takes this design from 60 to ~630 orders/sec; beyond that you change the persistence architecture, not a setting.</strong> ~630 orders/sec is already a firehose in the UI (hundreds of trades/second).</div>
+
+<h2 id="d3">D.3 &mdash; Making live high-frequency trading visible</h2>
+<p>Two things surprised us in the UI, both now understood:</p>
+<ol>
+  <li><strong>The order book and candles updated, but "Open Orders" and "Order History" stayed empty.</strong> Those two panels show <em>only the logged-in user's own</em> orders. If you are logged in as an account that has not traded, they are correctly empty. Log in as an account the generator is trading on and they fill instantly.</li>
+  <li><strong>They didn't refresh live.</strong> The component's <code>startAutoRefresh</code> only re-polled the order book each second. We extended it (guarded by login) to also refresh the user's orders, history and balances:</li>
+</ol>
+<pre><code>// crypto-exchange-fe/src/components/MarketOrderBook.vue
+startAutoRefresh() {
+  this.refreshInterval = setInterval(() =&gt; {
+    this.fetchOrderBook()
+    if (authUtils.isAuthenticated()) {
+      this.fetchOpenOrders()     // &lt;-- added
+      this.fetchClosedOrders()   // &lt;-- added (trade history)
+      this.fetchBalances()       // &lt;-- added
+    }
+  }, 1000)
+}</code></pre>
+<p>Now, logged in, you watch open orders appear and get consumed and the trade history scroll &mdash; once per second &mdash; while the generator runs. Note this is <strong>polling</strong>, not push; the order book deliberately polls the REST snapshot (robust and simple), while the candlestick chart uses the WebSocket <code>ohlcv</code> feed.</p>
+
+<h2 id="d4">D.4 &mdash; The load-test harness &amp; the 5-user HFT demo</h2>
+<p>To drive thousands of real orders we wrote a ~60-line standalone Go program (outside the repo module). It logs in as a user, then fires orders concurrently through the <em>real REST API</em> &mdash; a worker pool of goroutines, each POSTing to <code>/api/v1/orders/BTC-USDT</code> &mdash; and reports accepted/sec and how many trades resulted. It places a tight price band around the mid so most orders cross and match:</p>
+<pre><code>// pseudo-shape of the harness (not part of the app)
+jobs := make(chan int, n)
+for i := 0; i &lt; concurrency; i++ {           // a pool of worker goroutines
+    go func() {
+        for range jobs {
+            side  := rng.Intn(2)              // buy / sell
+            off   := float64(rng.Intn(6) - 3) // tight band => lots of crossing
+            mode  := maker; if aggressive(side, off) { mode = taker }
+            POST("/api/v1/orders/BTC-USDT", {side, order_type:0, mode, price:mid+off, size:0.001})
+        }
+    }()
+}
+// measure wall-clock over n orders => orders/sec</code></pre>
+<p>For the live demo we created <strong>five funded users</strong> and run one generator per user (as <code>systemd</code> units on the VM), so orders come from all five and cross-match against each other &mdash; realistic multi-party trading rather than self-trading. Aggregate throughput is still the single-writer ceiling (~630/sec), now spread across five accounts, each seeing its own share of ~130 orders/sec.</p>
+<div class="ok"><strong>How to watch it &mdash; log in as any of these on the trading page</strong> (<code>/markets/BTC-USDT</code>):
+<table>
+<tr><th>Username</th><th>Password</th><th>What you'll see</th></tr>
+<tr><td><code>user1@gmail.com</code> (or user2&hellip;user5)</td><td><code>Entamma!23</code></td><td>tens of thousands of open orders, a trade history growing ~130/sec, book + price churning every second</td></tr>
+</table>
+Each user is funded with large BTC + USDT so the generator never runs out. Balances update live in the order panel.</div>
+
+<h2 id="d5">D.5 &mdash; Go &amp; database concepts these changes teach</h2>
+<p>The tuning above is a compact lesson in several Go and systems concepts worth adding to your Part&nbsp;A toolkit:</p>
+<table>
+<tr><th>Concept</th><th>What it is</th><th>Where it showed up</th></tr>
+<tr><td><code>database/sql</code> connection pool</td><td><code>*sql.DB</code> is <em>not</em> one connection &mdash; it's a pool. <code>SetMaxOpenConns(n)</code> caps concurrency. More is not always faster.</td><td>Setting it to 1 beat setting it to 12 because the store serializes writes.</td></tr>
+<tr><td>Driver DSN parameters</td><td>Behaviour (pragmas, lock mode) is configured through the connection string, parsed by the driver &mdash; no API calls needed.</td><td><code>?_pragma=journal_mode(WAL)&hellip;</code> in <code>sql.Open</code>.</td></tr>
+<tr><td>fsync &amp; durability</td><td>A commit is only durable once flushed to disk; that flush dominates write latency. Relaxing it (WAL/NORMAL) trades a tiny crash-window for 10&times; throughput.</td><td>The 60 &rarr; 628 orders/sec jump.</td></tr>
+<tr><td>Single-writer serialization</td><td>Some stores allow exactly one writer; concurrency must be solved <em>above</em> them (batching, sharding) not by adding connections.</td><td>Why the pool regressed.</td></tr>
+<tr><td>Worker-pool concurrency</td><td>A fixed set of goroutines draining a <code>chan</code> of jobs &mdash; the canonical Go way to bound and drive parallel work.</td><td>The load harness (and, inside the app, the OHLCV worker pool).</td></tr>
+<tr><td>Bound methods as handlers (<code>-fm</code>)</td><td>In the Gin route dump you see <code>controller.OrderController.PlaceOrder-fm</code>: <code>-fm</code> marks a <em>method value</em> &mdash; a method bound to its receiver, passed around like a function.</td><td>Every route registration, e.g. <code>orderController.PlaceOrder</code>.</td></tr>
+</table>
+<div class="note"><strong>The one-sentence takeaway:</strong> a matching engine's speed is bounded by memory, but a <em>real exchange's</em> speed is bounded by how it makes trades durable &mdash; which is why the interesting engineering lives in the persistence and settlement layers, exactly where this codebase spends its complexity.</div>
+
+<p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents changes made in this working copy (SQLite WAL tuning in <code>db.go</code>; live-refresh in <code>MarketOrderBook.vue</code>; front-end backend-pointer) and the measured throughput behind them. License of the original project: non-commercial use only.</p>
 
 </div>
 </body>
