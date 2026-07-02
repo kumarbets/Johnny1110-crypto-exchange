@@ -12,7 +12,7 @@ class WebSocketService {
         // WebSocket 端點配置
         this.endpoints = {
             local: 'ws://localhost:8081/ws',
-            remote: 'ws://34.80.224.23:8081/ws'
+            remote: 'ws://66.94.113.205:8081/ws'
         }
         this.currentEndpoint = this.endpoints.remote // 預設使用 remote
     }

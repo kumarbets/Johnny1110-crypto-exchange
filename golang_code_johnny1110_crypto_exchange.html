@@ -1273,7 +1273,24 @@ $ curl -s -X POST http://localhost:8080/api/v1/orders/BTC-USDT \
   <li><strong>On your laptop:</strong> set <code>BASE_URL = 'http://&lt;VM_IP&gt;:8080'</code> in <code>apiService.js</code> and the WS <code>remote</code> endpoint to <code>ws://&lt;VM_IP&gt;:8081/ws</code> (and select <code>remote</code>).</li>
   <li><code>npm run serve</code> and open the printed URL. The page loads live markets, order book and candles served from the VM; placing an order round-trips to the remote matching engine.</li>
 </ol>
-<div class="note" id="live-status"><strong>This section is filled in with the concrete VM IP once the live deployment in this session is up.</strong></div>
+<div class="ok" id="live-status"><strong>Live deployment used to validate this guide.</strong> Everything below was actually run end-to-end.
+<ul>
+  <li><strong>Backend:</strong> cross-compiled locally to a static <code>linux/amd64</code> binary (<code>GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build</code> &mdash; the pure-Go SQLite driver means no CGO), uploaded with the seeded <code>exg.db</code> to <code>/app</code> on a test VM (<code>66.94.113.205</code>), and run as a <code>systemd</code> service (auto-restart). It listens on <code>:8080</code> (REST) and <code>:8081</code> (WS), both reachable from the laptop &mdash; <code>curl http://66.94.113.205:8080/health</code> &rarr; <code>{"status":"ok"}</code>.</li>
+  <li><strong>Front-end:</strong> <code>BASE_URL</code> set to <code>http://66.94.113.205:8080</code> and the WS <code>remote</code> endpoint to <code>ws://66.94.113.205:8081/ws</code>, then <code>npm run serve</code> on the laptop &mdash; Vue dev-server at <code>http://localhost:8081/</code>, talking to the remote engine.</li>
+  <li><strong>Seeding liquidity:</strong> the AMM couldn't fetch its BTSE index price from the datacenter IP (HTTP 403 geo-block) &mdash; the app tolerates this and simply doesn't auto-quote. To make the book come alive we registered two users, funded them via <code>POST /admin/api/v1/manual-adjustment</code> (<code>Admin-Token: frizo</code>), rested a maker ladder on BTC-USDT, then sent a crossing <strong>taker</strong> buy. Result: it matched at 65000, produced a real trade (0.2% taker fee = 0.0006 BTC), set <code>latest_price=65000</code>, and left a live two-sided book (best bid 64800 / best ask 65000). That is the whole engine, on real infrastructure, driven from a browser.</li>
+</ul>
+</div>
+<div class="note"><strong>Reproduce the seed yourself</strong> (against any running backend &mdash; swap the host):
+<pre><code>API=http://&lt;HOST&gt;:8080
+# fund a user, then place a maker sell + a crossing taker buy
+curl -s -X POST $API/admin/api/v1/manual-adjustment -H 'Admin-Token: frizo' \
+     -H 'Content-Type: application/json' -d '{"username":"johnny","amount":100,"asset":"BTC"}'
+TOKEN=$(curl -s -X POST $API/api/v1/users/login -H 'Content-Type: application/json' \
+     -d '{"username":"johnny","password":"&lt;pw&gt;"}' | grep -oE '"token":"[^"]+"' | cut -d'"' -f4)
+curl -s -X POST $API/api/v1/orders/BTC-USDT -H "Authorization: $TOKEN" \
+     -H 'Content-Type: application/json' -d '{"side":1,"order_type":0,"mode":0,"price":65000,"size":0.8}'  # maker sell
+curl -s -X POST $API/api/v1/orders/BTC-USDT -H "Authorization: $TOKEN" \
+     -H 'Content-Type: application/json' -d '{"side":0,"order_type":0,"mode":1,"price":65000,"size":0.3}'  # taker buy -> trade</code></pre></div>
 
 <h2 id="c5">C.5 &mdash; API &amp; WebSocket reference</h2>
 <table>
