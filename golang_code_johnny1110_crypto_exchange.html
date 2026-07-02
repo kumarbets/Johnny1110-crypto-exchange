@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Build From Scratch — johnny1110/crypto-exchange (Go)</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --accent: #0b5fff;
+    --border: #d0d0d0;
+    --code-bg: #1e1e1e;
+    --code-fg: #e8e8e8;
+    --warn-bg: #fff7e0;
+    --warn-bd: #e0b300;
+    --note-bg: #eaf3ff;
+    --note-bd: #0b5fff;
+    --ok-bg: #e6f7ea;
+    --ok-bd: #1f8b3a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+    color: var(--fg);
+    background: var(--bg);
+    padding: 24px 16px 96px;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1, h2, h3, h4 { line-height: 1.25; margin-top: 2em; }
+  h1 { font-size: 1.85rem; border-bottom: 2px solid var(--accent); padding-bottom: 8px; margin-top: 0; }
+  h2 { font-size: 1.45rem; border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-top: 2.4em; }
+  h3 { font-size: 1.15rem; color: #222; }
+  h4 { font-size: 1.0rem; color: #333; }
+  p, li { font-size: 0.97rem; }
+  code {
+    font-family: Menlo, Consolas, "Courier New", monospace;
+    background: #ececec;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.88em;
+    word-break: break-word;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 14px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.45;
+  }
+  pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 0.9rem;
+    display: block;
+    overflow-x: auto;
+  }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #eee; }
+  .note, .warn, .ok {
+    border-left: 4px solid var(--note-bd);
+    background: var(--note-bg);
+    padding: 10px 14px;
+    margin: 14px 0;
+    border-radius: 4px;
+  }
+  .warn { border-color: var(--warn-bd); background: var(--warn-bg); }
+  .ok   { border-color: var(--ok-bd);   background: var(--ok-bg); }
+  details {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 14px 0;
+    background: #fff;
+  }
+  details > summary { cursor: pointer; font-weight: 600; }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin: 3px 0; }
+  .toc > ol > li { margin: 5px 0; }
+  .step {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 24px 0;
+  }
+  .step-tag {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .file-path {
+    color: var(--muted);
+    font-family: Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    display: block;
+    margin: 6px 0 2px;
+  }
+  .pill { display:inline-block; background:#eef; border:1px solid #ccd; color:#334; border-radius:10px; padding:1px 8px; font-size:0.78rem; margin:2px 3px; }
+  .kbd { background:#f4f4f4; border:1px solid #bbb; border-bottom-width:2px; border-radius:4px; padding:0 5px; font-family:Menlo,Consolas,monospace; font-size:0.82em; }
+  .top-btn {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    background: var(--accent);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 24px;
+    text-decoration: none;
+    font-size: 0.85rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .diagram { background:#fafafa; border:1px solid var(--border); border-radius:8px; padding:14px; overflow-x:auto; }
+  .diagram pre { background:transparent; color:#222; font-size:0.8rem; padding:0; }
+  @media (max-width: 768px) {
+    body { padding: 14px 10px 80px; }
+    h1 { font-size: 1.45rem; }
+    h2 { font-size: 1.2rem; }
+    h3 { font-size: 1.05rem; }
+    pre { font-size: 0.78rem; padding: 10px 12px; }
+    table { font-size: 0.82rem; }
+  }
+  @media (max-width: 480px) {
+    pre { font-size: 0.72rem; }
+    .step { padding: 12px; }
+    .diagram pre { font-size: 0.68rem; }
+  }
+</style>
+</head>
+<body>
+<a href="#top" class="top-btn">&uarr; Top</a>
+<div class="wrap" id="top">
+
+<h1>Build From Scratch &mdash; johnny1110/crypto-exchange</h1>
+
+<p>This guide takes you from an <strong>empty folder</strong> to a fully working spot cryptocurrency exchange written in Go &mdash; the exact project that lives in <code>crypto-exchange/</code>, with a Vue front-end in <code>crypto-exchange-fe/</code>. When you finish you will have built:</p>
+
+<ul>
+  <li>An <strong>in-memory limit-order matching engine</strong> (millions of orders/sec) with a proper price&mdash;time-priority order book.</li>
+  <li>A <strong>REST API</strong> (Gin) for register / login / balances / place &amp; cancel orders / market data.</li>
+  <li>A <strong>WebSocket server</strong> pushing live order-book, candlestick and market feeds.</li>
+  <li>A transactional <strong>settlement layer</strong> on SQLite that freezes funds, records trades and applies fees atomically.</li>
+  <li>An <strong>OHLCV (candlestick) aggregator</strong> that turns the trade stream into 15m/1h/4h/1d/1w bars.</li>
+  <li>A background <strong>Automated Market Maker (AMM)</strong> bot that quotes liquidity on all 12 markets from a real index price.</li>
+  <li>A set of <strong>schedulers</strong> that refresh snapshots, compute 24h stats, run the AMM and feed WebSocket clients.</li>
+</ul>
+
+<div class="ok">
+<strong>Who this is for &mdash; Go beginners welcome.</strong> You do <em>not</em> need to already know Go, order books, or exchanges. <strong>Part&nbsp;A is a from-zero Go crash course</strong> covering <em>every</em> language concept this codebase uses &mdash; variables, <code>iota</code> enums, functions and the <code>(value, error)</code> idiom, slices, maps, structs, methods, pointers, interfaces, generics, goroutines, channels, mutexes, <code>sync.Map</code>, packages, JSON tags, and HTTP with Gin &mdash; each with a tiny runnable snippet and a note on <em>where you meet it in the exchange</em>. Read Part&nbsp;A once, then <strong>Part&nbsp;B</strong> builds the whole backend in dependency order, and <strong>Part&nbsp;C</strong> shows how to run the backend, the Vue front-end, and the tests. The only thing to install first is Go (&sect;A.2).
+</div>
+
+<div class="note">
+<strong>How to read this document.</strong> Every code block is real code from the repository (paths are shown above each block). Build the project <em>bottom-up</em>: the matching engine has no dependencies, so it comes first; <code>main.go</code> that wires everything together comes last. If a type is referenced before it is defined, it is defined in a later step of the same section &mdash; keep going.
+</div>
+
+<details class="toc" open>
+<summary>Table of contents</summary>
+<strong>Part A &mdash; Go from absolute zero</strong>
+<ol>
+  <li><a href="#a1">A.1 &mdash; What Go is &amp; why this project uses it</a></li>
+  <li><a href="#a2">A.2 &mdash; Install Go &amp; your first program</a></li>
+  <li><a href="#a3">A.3 &mdash; Modules &amp; imports (<code>go.mod</code>)</a></li>
+  <li><a href="#a4">A.4 &mdash; Variables, constants, types, zero values</a></li>
+  <li><a href="#a5">A.5 &mdash; <code>iota</code> enums (Side / Mode / OrderType / OrderStatus)</a></li>
+  <li><a href="#a6">A.6 &mdash; Functions &amp; the <code>(value, error)</code> idiom</a></li>
+  <li><a href="#a7">A.7 &mdash; Control flow: if / for / switch</a></li>
+  <li><a href="#a8">A.8 &mdash; Slices, arrays &amp; maps</a></li>
+  <li><a href="#a9">A.9 &mdash; Structs &amp; methods</a></li>
+  <li><a href="#a10">A.10 &mdash; Pointers (why <code>*Order</code> and <code>&amp;o</code>)</a></li>
+  <li><a href="#a11">A.11 &mdash; Interfaces (the whole architecture leans on them)</a></li>
+  <li><a href="#a12">A.12 &mdash; Generics (Go 1.18+)</a></li>
+  <li><a href="#a13">A.13 &mdash; Errors: return them, don't throw</a></li>
+  <li><a href="#a14">A.14 &mdash; Concurrency: goroutines, channels, mutex, <code>sync.Map</code></a></li>
+  <li><a href="#a15">A.15 &mdash; Packages &amp; visibility (Capitalized = exported)</a></li>
+  <li><a href="#a16">A.16 &mdash; JSON struct tags &amp; custom marshalling</a></li>
+  <li><a href="#a17">A.17 &mdash; HTTP with Gin &amp; the third-party libraries used</a></li>
+  <li><a href="#a18">A.18 &mdash; Tooling cheat-sheet + how to read Go fast</a></li>
+</ol>
+<strong>Part B &mdash; Build the exchange backend</strong>
+<ol start="19">
+  <li><a href="#b1">B.1 &mdash; The shape of the project</a></li>
+  <li><a href="#b2">B.2 &mdash; Step 0: module, folders, dependencies</a></li>
+  <li><a href="#b3">B.3 &mdash; Step 1: the domain model (<code>engine-v2/model</code>)</a></li>
+  <li><a href="#b4">B.4 &mdash; Step 2: the order book data structures</a></li>
+  <li><a href="#b5">B.5 &mdash; Step 3: the matching algorithm</a></li>
+  <li><a href="#b6">B.6 &mdash; Step 4: the MatchingEngine facade</a></li>
+  <li><a href="#b7">B.7 &mdash; Step 5: DTOs &amp; the market config</a></li>
+  <li><a href="#b8">B.8 &mdash; Step 6: SQLite &amp; the repository layer</a></li>
+  <li><a href="#b9">B.9 &mdash; Step 7: the service layer &amp; two-phase order placement</a></li>
+  <li><a href="#b10">B.10 &mdash; Step 8: settlement (fees, balance moves)</a></li>
+  <li><a href="#b11">B.11 &mdash; Step 9: security, middleware, controllers, router</a></li>
+  <li><a href="#b12">B.12 &mdash; Step 10: OHLCV candlestick aggregator</a></li>
+  <li><a href="#b13">B.13 &mdash; Step 11: WebSocket hub</a></li>
+  <li><a href="#b14">B.14 &mdash; Step 12: schedulers &amp; the AMM bot</a></li>
+  <li><a href="#b15">B.15 &mdash; Step 13: the DI container</a></li>
+  <li><a href="#b16">B.16 &mdash; Step 14: main.go &amp; startup helpers</a></li>
+</ol>
+<strong>Part C &mdash; Run it, test it, see it live</strong>
+<ol start="35">
+  <li><a href="#c1">C.1 &mdash; Run the backend (Docker &amp; local)</a></li>
+  <li><a href="#c2">C.2 &mdash; Run the Vue front-end</a></li>
+  <li><a href="#c3">C.3 &mdash; Test methods (unit, benchmark, curl walkthrough)</a></li>
+  <li><a href="#c4">C.4 &mdash; Live demo: backend on a test VM, front-end on your laptop</a></li>
+  <li><a href="#c5">C.5 &mdash; API &amp; WebSocket reference</a></li>
+</ol>
+</details>
+
+<!-- ============================================================ -->
+<!-- PART A                                                       -->
+<!-- ============================================================ -->
+<h1 id="partA">Part A &mdash; Go from absolute zero</h1>
+<p>Everything below is a concept the exchange actually uses. Each section ends with a <em>"where you meet it"</em> pointer so the abstract idea has a concrete home.</p>
+
+<h2 id="a1">A.1 &mdash; What Go is &amp; why this project uses it</h2>
+<p>Go (a.k.a. Golang) is a small, statically-typed, compiled language from Google. It has three properties that make it ideal for an exchange:</p>
+<ul>
+  <li><strong>Fast, native binaries.</strong> The whole exchange compiles to a single ~20&nbsp;MB executable with no runtime to install. The order-book benchmarks in the README hit <em>~1.9&nbsp;million orders/second</em> &mdash; that is Go compiling to machine code.</li>
+  <li><strong>Cheap concurrency.</strong> A <em>goroutine</em> costs a few KB, so the app happily runs dozens of them: an HTTP server, a WebSocket server, four schedulers, an OHLCV worker pool &mdash; all at once.</li>
+  <li><strong>Boring on purpose.</strong> One way to write a loop, one error convention, one formatter (<code>gofmt</code>). Large codebases stay readable.</li>
+</ul>
+
+<h2 id="a2">A.2 &mdash; Install Go &amp; your first program</h2>
+<p>Download from <code>go.dev/dl</code> (this project needs <strong>Go 1.23+</strong>). Verify:</p>
+<pre><code>$ go version
+go version go1.23.9 ...</code></pre>
+<p>Your first program &mdash; every Go program starts at <code>func main()</code> in <code>package main</code>:</p>
+<pre><code>// hello.go
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("hello, exchange")
+}</code></pre>
+<pre><code>$ go run hello.go      # compile + run in one shot
+hello, exchange
+$ go build hello.go    # produce a ./hello binary</code></pre>
+<p class="file-path">Where you meet it: crypto-exchange/main.go &mdash; the real <code>func main()</code> that boots the exchange.</p>
+
+<h2 id="a3">A.3 &mdash; Modules &amp; imports</h2>
+<p>A <em>module</em> is a versioned bundle of packages, declared in <code>go.mod</code>. The first line names the module; that name is the import prefix for every internal package.</p>
+<pre><code>// go.mod (top of the real file)
+module github.com/johnny1110/crypto-exchange
+
+go 1.23.0
+
+require (
+    github.com/gin-gonic/gin v1.10.1        // HTTP framework
+    github.com/emirpasic/gods v1.18.1       // TreeMap for price levels
+    github.com/ncruces/go-sqlite3 v0.26.1   // pure-Go SQLite driver
+    github.com/ethereum/go-ethereum v1.15.11
+    golang.org/x/crypto v0.39.0             // bcrypt
+    ...
+)</code></pre>
+<p>So <code>engine-v2/model/order.go</code> is imported as <code>github.com/johnny1110/crypto-exchange/engine-v2/model</code>. Run <code>go mod tidy</code> and Go downloads every dependency and writes exact versions to <code>go.sum</code>.</p>
+
+<h2 id="a4">A.4 &mdash; Variables, constants, types, zero values</h2>
+<pre><code>var price float64 = 65000.0   // explicit type
+size := 0.5                   // := infers float64
+const feeRate = 0.002         // constant, untyped
+
+var status string             // zero value: "" (empty string)
+var filled bool               // zero value: false
+var count int                 // zero value: 0
+var book *OrderBook           // zero value: nil (pointer)</code></pre>
+<p>Key idea: an uninitialised variable is never "garbage" &mdash; it holds the <strong>zero value</strong> for its type. This is why a freshly-created <code>Order</code> whose <code>RemainingSize</code> field is never set is <code>0</code>, and a <code>*OrderBook</code> you forgot to build is <code>nil</code> (and dereferencing it panics).</p>
+
+<h2 id="a5">A.5 &mdash; <code>iota</code> enums</h2>
+<p>Go has no <code>enum</code> keyword. Instead you declare a named integer type and use <code>iota</code> (an auto-incrementing counter, resets per <code>const</code> block). This <em>is</em> how the exchange models order sides and types &mdash; here is the real code:</p>
+<pre><code>// engine-v2/model/order.go
+type Side int
+type Mode int
+type OrderType int
+type OrderStatus string
+
+const ( LIMIT OrderType = iota; MARKET )       // LIMIT=0, MARKET=1
+const ( BID Side = iota; ASK )                 // BID=0,   ASK=1
+const ( MAKER Mode = iota; TAKER )             // MAKER=0, TAKER=1
+
+const (
+    ORDER_STATUS_NEW      OrderStatus = "NEW"
+    ORDER_STATUS_PARTIAL  OrderStatus = "PARTIAL"
+    ORDER_STATUS_FILLED   OrderStatus = "FILLED"
+    ORDER_STATUS_CANCELED OrderStatus = "CANCELED"
+)</code></pre>
+<p>Because <code>Side</code> is its own type (not a bare <code>int</code>), you cannot accidentally pass a price where a side is expected &mdash; the compiler rejects it. A neat trick the engine uses: the opposite side is just a bit-flip, <code>o.Side ^ 1</code> (BID&harr;ASK).</p>
+
+<h2 id="a6">A.6 &mdash; Functions &amp; the <code>(value, error)</code> idiom</h2>
+<p>Functions can return multiple values. Go's universal convention is <strong>"result, error"</strong>: the last return is an <code>error</code> that is <code>nil</code> on success.</p>
+<pre><code>func (e *MatchingEngine) GetOrderBook(market string) (*book.OrderBook, error) {
+    ob, ok := e.orderbooks[market]
+    if !ok {
+        return nil, fmt.Errorf("market %s not found", market)
+    }
+    return ob, nil
+}
+
+// caller:
+ob, err := engine.GetOrderBook("BTC-USDT")
+if err != nil {
+    return nil, err   // bubble it up
+}
+// ... use ob</code></pre>
+<p>You will type <code>if err != nil { return ... }</code> hundreds of times. That verbosity is deliberate: every failure is visible at the call site.</p>
+
+<h2 id="a7">A.7 &mdash; Control flow: if / for / switch</h2>
+<p><code>for</code> is Go's <em>only</em> loop keyword (it covers while, for, and infinite loops). <code>switch</code> needs no <code>break</code>. The matching loop is a real example:</p>
+<pre><code>// keep matching until the order is filled or no price crosses
+for order.RemainingSize &gt; 0 {
+    bestPrice, err := opposite.BestPrice()
+    if err != nil || !ob.canMatch(order.Side, order.Price, bestPrice) {
+        break
+    }
+    // ... execute one match
+}
+
+switch orderType {
+case model.LIMIT:  return ob.placeLimitOrder(order)
+case model.MARKET: return ob.placeMarketOrder(order)
+default:           return nil, ErrUnsupportedOrderType
+}</code></pre>
+
+<h2 id="a8">A.8 &mdash; Slices, arrays &amp; maps</h2>
+<p>A <strong>slice</strong> is a growable list (<code>[]T</code>); a <strong>map</strong> is a hash table (<code>map[K]V</code>). Both appear everywhere:</p>
+<pre><code>trades := make([]Trade, 0, len(orderDTOs))  // slice, pre-sized capacity
+trades = append(trades, trade)              // grow it
+
+orderbooks := make(map[string]*book.OrderBook)   // market name -&gt; book
+ob, ok := orderbooks["BTC-USDT"]                 // comma-ok: ok is false if absent
+if ok { /* found */ }</code></pre>
+<p>The <code>value, ok := m[key]</code> "comma-ok" form is how you tell "missing key" from "present but zero". The engine uses exactly this in <code>GetOrderBook</code> above.</p>
+
+<h2 id="a9">A.9 &mdash; Structs &amp; methods</h2>
+<p>A <strong>struct</strong> groups fields; a <strong>method</strong> is a function with a receiver. The <code>Order</code> struct is the heart of the engine:</p>
+<pre><code>// engine-v2/model/order.go
+type Order struct {
+    ID            string
+    UserID        string
+    Side          Side
+    Price         float64
+    OriginalSize  float64
+    RemainingSize float64
+    QuoteAmount   float64   // only used by MARKET bid orders
+    Mode          Mode
+    FeeRate       float64
+    Timestamp     time.Time
+}
+
+// a method: (o *Order) is the receiver
+func (o *Order) GetStatus() OrderStatus {
+    if o.OriginalSize == o.RemainingSize { return ORDER_STATUS_NEW }
+    if o.RemainingSize &lt;= utils.Scale    { return ORDER_STATUS_FILLED }
+    if o.RemainingSize &gt; 0 &amp;&amp; o.RemainingSize &lt; o.OriginalSize { return ORDER_STATUS_PARTIAL }
+    return ORDER_STATUS_CANCELED
+}</code></pre>
+<p>Notice status is <em>computed</em> from sizes rather than stored &mdash; a single source of truth. <code>utils.Scale</code> is a tiny epsilon (<code>0.00000001</code>) so floating-point dust counts as "filled".</p>
+
+<h2 id="a10">A.10 &mdash; Pointers (why <code>*Order</code> and <code>&amp;o</code>)</h2>
+<p>A pointer holds the <em>address</em> of a value. <code>&amp;o</code> takes an address; <code>*p</code> dereferences it. You use a pointer when a method must <strong>mutate</strong> the value, or to avoid copying a large struct.</p>
+<pre><code>func NewOrder(...) *Order {         // returns a pointer to a new Order
+    return &amp;Order{ ID: orderId, ... }
+}
+
+func (o *Order) fill(qty float64) { // pointer receiver =&gt; mutation sticks
+    o.RemainingSize -= qty
+}</code></pre>
+<p>The matching engine threads <code>*Order</code> everywhere precisely because matching <em>reduces</em> <code>RemainingSize</code> in place, and the doubly-linked list stores pointers to the same order objects.</p>
+<div class="note"><strong>Rule of thumb:</strong> use a pointer receiver if the method changes the struct <em>or</em> the struct is big; use a value receiver for small, read-only helpers. The exchange uses pointer receivers almost everywhere for consistency.</div>
+
+<h2 id="a11">A.11 &mdash; Interfaces</h2>
+<p>An <strong>interface</strong> is a set of method signatures. Any type that has those methods <em>satisfies</em> the interface automatically &mdash; no <code>implements</code> keyword. This is the single most important idea for understanding this codebase, because every layer is wired through interfaces.</p>
+<pre><code>// repository/interface.go (shape)
+type IOrderRepository interface {
+    Insert(ctx context.Context, db DBExecutor, order *dto.Order) error
+    CancelOrder(ctx context.Context, db DBExecutor, orderId string, remainingSize float64) error
+    PaginationQuery(...) ([]*dto.Order, error)
+    // ...
+}</code></pre>
+<p>The service layer depends on <code>IOrderRepository</code> (the <em>interface</em>), not on the concrete SQLite implementation. That means you can swap SQLite for Postgres, or a fake in a unit test, without touching the service. Two patterns you will see constantly:</p>
+<ul>
+  <li><strong>Constructor returns the interface:</strong> <code>func NewOrderRepository() IOrderRepository { return &amp;orderRepository{} }</code> &mdash; callers only ever see the interface.</li>
+  <li><strong>An abstraction that lets a repo run on either a DB or a transaction:</strong> <code>DBExecutor</code> is an interface satisfied by both <code>*sql.DB</code> and <code>*sql.Tx</code>, so the same <code>Insert</code> works inside or outside a transaction.</li>
+</ul>
+
+<h2 id="a12">A.12 &mdash; Generics (Go 1.18+)</h2>
+<p>Generics let a function or type work over many element types with compile-time safety. The order book's per-price-level list and the <code>gods</code> TreeMap are generic containers:</p>
+<pre><code>func Max[T int | float64](a, b T) T {
+    if a &gt; b { return a }
+    return b
+}
+Max(3, 5)        // T inferred as int
+Max(1.2, 0.7)    // T inferred as float64</code></pre>
+<p>You mostly <em>consume</em> generics here (via the <code>emirpasic/gods</code> TreeMap and the project's own <code>OrderNodeDeque</code>) rather than write them.</p>
+
+<h2 id="a13">A.13 &mdash; Errors: return them, don't throw</h2>
+<p>Go has no exceptions for ordinary failures. <code>error</code> is just an interface with one method, <code>Error() string</code>. You create sentinel errors once and compare with <code>errors.Is</code>:</p>
+<pre><code>// service/impl/orders.go
+var (
+    ErrInvalidInput        = errors.New("invalid input")
+    ErrOrderNotFound       = errors.New("order not found")
+    ErrInsufficientBalance = errors.New("insufficient balance")
+)
+
+if err := s.balanceRepo.LockedByUserIdAndAsset(...); err != nil {
+    return ErrInsufficientBalance   // map low-level failure to a domain error
+}</code></pre>
+<p><code>panic</code> exists but is reserved for truly unrecoverable startup faults (e.g. a scheduler that fails to start) &mdash; you will see it only in <code>main.go</code>/<code>startup_helper.go</code>.</p>
+
+<h2 id="a14">A.14 &mdash; Concurrency: goroutines, channels, mutex, <code>sync.Map</code></h2>
+<p>Start concurrent work with <code>go f()</code>. Communicate over <strong>channels</strong>. Protect shared memory with a <strong>mutex</strong>. All four appear in the exchange:</p>
+<pre><code>// goroutine: the WebSocket server runs alongside the HTTP server
+go func() {
+    http.HandleFunc("/ws", ...)
+    http.ListenAndServe(":8081", nil)
+}()
+
+// channel: the OHLCV aggregator streams trades between goroutines
+tradeCh chan *Trade
+
+// RWMutex: many readers OR one writer guards the engine's book map
+type MatchingEngine struct {
+    mu         sync.RWMutex
+    orderbooks map[string]*book.OrderBook
+}
+
+// sync.Map: lock-free concurrent map of symbol -&gt; realtime bars
+realtimeSymbolBars sync.Map</code></pre>
+<p>Rule: <code>sync.RWMutex</code> when reads vastly outnumber writes (order-book snapshots), a plain <code>sync.Mutex</code> for the book itself during matching, and <code>sync.Map</code> for the OHLCV per-symbol state that many goroutines touch.</p>
+
+<h2 id="a15">A.15 &mdash; Packages &amp; visibility</h2>
+<p>Each folder is one package. <strong>Capitalised identifiers are exported</strong> (public to other packages); lowercase ones are private. So <code>Order</code>, <code>PlaceOrder</code> are usable elsewhere; <code>orderService</code>, <code>makeLimitOrder</code> are internal helpers. This convention <em>is</em> the access control &mdash; there is no <code>public</code>/<code>private</code> keyword.</p>
+
+<h2 id="a16">A.16 &mdash; JSON struct tags &amp; custom marshalling</h2>
+<p>Struct tags tell the JSON encoder how to render a field. The exchange even implements a custom <code>MarshalJSON</code> on its order DTO so timestamps become Unix millis and the fee rate becomes a pretty percentage string:</p>
+<pre><code>type Balance struct {
+    Asset     string  `json:"asset"`
+    Available float64 `json:"available"`
+    Locked    float64 `json:"locked"`
+}
+
+// dto.Order implements MarshalJSON() to control the exact API shape,
+// e.g. fee_rate -&gt; "0.2000%", created_at -&gt; UnixMilli(int64).</code></pre>
+
+<h2 id="a17">A.17 &mdash; HTTP with Gin &amp; the libraries used</h2>
+<p><a href="https://gin-gonic.com">Gin</a> is the HTTP framework. You create an engine, attach middleware, group routes, and each handler receives a <code>*gin.Context</code>:</p>
+<pre><code>router := gin.Default()
+router.Use(middleware.CORS())
+public := router.Group("/api/v1")
+public.POST("/users/login", userController.Login)
+
+func (c *UserController) Login(ctx *gin.Context) {
+    var req dto.LoginReq
+    ctx.ShouldBindJSON(&amp;req)      // parse body
+    // ...
+    ctx.JSON(200, gin.H{"code": "0000000", "data": token})
+}</code></pre>
+<p>Third-party libraries you will import, and why:</p>
+<table>
+<tr><th>Library</th><th>Role in the exchange</th></tr>
+<tr><td><code>gin-gonic/gin</code></td><td>REST API router, middleware, JSON binding</td></tr>
+<tr><td><code>gin-contrib/cors</code></td><td>CORS so the browser front-end can call the API</td></tr>
+<tr><td><code>emirpasic/gods</code> (TreeMap)</td><td>sorted price&rarr;level map inside each order-book side</td></tr>
+<tr><td><code>ncruces/go-sqlite3</code></td><td>pure-Go SQLite driver (no CGO needed)</td></tr>
+<tr><td><code>golang.org/x/crypto/bcrypt</code></td><td>password hashing on register/login</td></tr>
+<tr><td><code>google/uuid</code></td><td>generating IDs / auth tokens</td></tr>
+<tr><td><code>prometheus/client_golang</code></td><td><code>/metrics</code> endpoint</td></tr>
+<tr><td><code>ethereum/go-ethereum</code></td><td>optional on-chain settlement client (defined but not wired into the hot path)</td></tr>
+<tr><td><code>labstack/gommon/log</code></td><td>levelled logging to stdout + a daily file</td></tr>
+</table>
+
+<h2 id="a18">A.18 &mdash; Tooling cheat-sheet</h2>
+<table>
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td><code>go run .</code></td><td>build + run the package in the current directory</td></tr>
+<tr><td><code>go build ./...</code></td><td>compile everything (catches type errors fast)</td></tr>
+<tr><td><code>go test ./...</code></td><td>run all <code>_test.go</code> tests</td></tr>
+<tr><td><code>go test -bench=. ./engine-v2/book</code></td><td>run the order-book benchmarks from the README</td></tr>
+<tr><td><code>go mod tidy</code></td><td>add missing / drop unused dependencies</td></tr>
+<tr><td><code>gofmt -w .</code> / <code>go vet ./...</code></td><td>format / lint</td></tr>
+</table>
+<p>How to read an unfamiliar Go file fast: read the <code>type</code> declarations first (the nouns), then the exported methods (the verbs), then <code>main</code>/constructors to see wiring. That is exactly the order Part&nbsp;B follows.</p>
+
+<!-- ============================================================ -->
+<!-- PART B                                                       -->
+<!-- ============================================================ -->
+<h1 id="partB">Part B &mdash; Build the exchange backend</h1>
+
+<h2 id="b1">B.1 &mdash; The shape of the project</h2>
+<p>The backend is a classic <strong>layered architecture</strong> wired together by a dependency-injection container. Data flows top-to-bottom on the way in, and events flow back out over WebSocket:</p>
+<div class="diagram"><pre>
+   Browser / Vue app
+        │  REST :8080                 WebSocket :8081
+        ▼                                   ▲
+  ┌───────────────┐   middleware      ┌───────────────┐
+  │  controller/  │  (CORS, Auth,     │     ws/ Hub    │◄── schedulers push
+  └──────┬────────┘   Admin, Error)   └──────▲────────┘    snapshots/candles
+         ▼                                   │
+  ┌───────────────┐                   ┌──────┴────────┐
+  │   service/    │───── trades ─────►│  ohlcv/ agg.  │──► candlesticks
+  │  (biz logic,  │                   └───────────────┘
+  │  2-phase txn) │
+  └──┬─────────┬──┘
+     │         │ place/cancel
+     ▼         ▼
+┌─────────┐  ┌───────────────────────┐
+│ repo/   │  │  engine-v2 (in-memory  │
+│ SQLite  │  │  matching engine)      │
+└─────────┘  └───────────────────────┘
+     ▲                 ▲
+     │  container/ (DI) wires all of the above; scheduler/ drives the AMM + feeds
+</pre></div>
+<p>Top-level files &amp; folders (ignore the <code>https-github.com-...</code> mirror folder &mdash; it is a duplicate of the repo):</p>
+<table>
+<tr><th>Path</th><th>Responsibility</th></tr>
+<tr><td><code>main.go</code>, <code>db.go</code>, <code>router.go</code>, <code>startup_helper.go</code></td><td>boot: DB, engine, container, router, WS, recovery, schedulers</td></tr>
+<tr><td><code>engine-v2/</code></td><td>the matching engine (model, book, core, market, util)</td></tr>
+<tr><td><code>engine-v1/</code></td><td>the original engine &mdash; legacy, kept for reference, not used</td></tr>
+<tr><td><code>dto/</code></td><td>data-transfer objects between HTTP / service / engine</td></tr>
+<tr><td><code>repository/</code></td><td>SQLite persistence (users, balances, orders, trades)</td></tr>
+<tr><td><code>service/</code></td><td>business logic: orders, balances, users, admin, AMM, metrics</td></tr>
+<tr><td><code>controller/</code>, <code>middleware/</code>, <code>security/</code></td><td>HTTP layer + auth</td></tr>
+<tr><td><code>ohlcv/</code></td><td>candlestick aggregator + worker pool</td></tr>
+<tr><td><code>scheduler/</code></td><td>periodic jobs (snapshot, market-data, AMM, WS feeder)</td></tr>
+<tr><td><code>ws/</code></td><td>WebSocket hub &amp; clients</td></tr>
+<tr><td><code>container/</code></td><td>dependency-injection wiring</td></tr>
+<tr><td><code>settings/</code></td><td>markets, assets, AMM level config</td></tr>
+<tr><td><code>external/</code></td><td>fetch index price from BTSE public API</td></tr>
+<tr><td><code>chainUtil/</code></td><td>Ethereum helper (optional)</td></tr>
+<tr><td><code>doc/</code></td><td>API docs + SQL schema + seed data</td></tr>
+</table>
+
+<h2 id="b2">B.2 &mdash; Step 0: module, folders, dependencies</h2>
+<div class="step">
+<span class="step-tag">STEP 0</span>
+<pre><code>$ mkdir crypto-exchange &amp;&amp; cd crypto-exchange
+$ go mod init github.com/johnny1110/crypto-exchange
+$ go get github.com/gin-gonic/gin github.com/gin-contrib/cors
+$ go get github.com/emirpasic/gods
+$ go get github.com/ncruces/go-sqlite3
+$ go get golang.org/x/crypto/bcrypt github.com/google/uuid
+$ go get github.com/prometheus/client_golang github.com/labstack/gommon</code></pre>
+<p>Create the folder skeleton (each becomes a package):</p>
+<pre><code>engine-v2/{model,book,core,market,util}
+dto  repository/impl  service/impl/{amm,metrics}  service/serviceHelper
+controller  middleware  security  ohlcv  scheduler  ws  container
+settings  external  doc/db_schema</code></pre>
+</div>
+
+<h2 id="b3">B.3 &mdash; Step 1: the domain model (<code>engine-v2/model</code>)</h2>
+<p>Start with the thing that has zero dependencies: the <code>Order</code> and its enums (shown in A.5/A.9). Add the linked-list node used inside the book, and the constructor:</p>
+<div class="step">
+<span class="step-tag">STEP 1</span>
+<span class="file-path">engine-v2/model/order.go</span>
+<pre><code>func NewOrder(orderId, userId string, side Side, price, size, quoteAmt float64,
+              mode Mode, feeRate float64) *Order {
+    return &amp;Order{
+        ID: orderId, UserID: userId, Side: side, Price: price,
+        OriginalSize: size, RemainingSize: size, QuoteAmount: quoteAmt,
+        FeeRate: feeRate, Mode: mode, Timestamp: time.Now(),
+    }
+}
+
+func (o *Order) CounterSide() Side { return o.Side ^ 1 }   // BID&harr;ASK bit-flip
+
+// A node in the price-level's doubly-linked list.
+type OrderNode struct {
+    Order      *Order
+    Prev, Next *OrderNode
+}
+func (n *OrderNode) Size()  float64 { return n.Order.RemainingSize }
+func (n *OrderNode) Price() float64 { return n.Order.Price }</code></pre>
+</div>
+<p>Also define the market descriptor used to route and validate orders:</p>
+<div class="step">
+<span class="file-path">engine-v2/market/market.go</span>
+<pre><code>type MarketInfo struct {
+    Name       string   // "BTC-USDT"
+    BaseAsset  string   // "BTC"  (what you buy/sell)
+    QuoteAsset string   // "USDT" (what you pay with)
+}</code></pre>
+</div>
+
+<h2 id="b4">B.4 &mdash; Step 2: the order book data structures</h2>
+<p>An order book is two sorted ladders of prices. At each price sits a FIFO queue of resting orders (price&mdash;time priority). Three structures make this fast:</p>
+<table>
+<tr><th>Structure</th><th>Backed by</th><th>Why</th></tr>
+<tr><td><code>OrderNodeDeque</code> (per price level)</td><td>doubly-linked list</td><td>O(1) push/pop at both ends &rarr; time priority (FIFO) within a price</td></tr>
+<tr><td><code>BookSide</code> (bid or ask)</td><td><code>gods</code> TreeMap (price&rarr;deque)</td><td>O(log n) insert; keeps prices sorted so "best price" is one step away</td></tr>
+<tr><td><code>OrderIndex</code></td><td><code>map[string]indexEntry</code></td><td>O(1) cancel: jump straight to an order by ID without scanning</td></tr>
+</table>
+<div class="step">
+<span class="step-tag">STEP 2</span>
+<span class="file-path">engine-v2/util/deque.go &mdash; FIFO queue at one price</span>
+<pre><code>type OrderNodeDeque struct {
+    head, tail *model.OrderNode
+    size       int
+    volume     float64   // running sum of remaining sizes at this price
+}
+// PushBack / PopFront are O(1); volume is kept in sync for fast level aggregation.</code></pre>
+<span class="file-path">engine-v2/book/book_side.go &mdash; one side of the book</span>
+<pre><code>type BookSide struct {
+    priceLevels      *treemap.Map  // emirpasic/gods, key=price, value=*OrderNodeDeque
+    isBid            bool          // bid: best = highest price; ask: best = lowest
+    totalVolume      float64       // sum of all resting sizes (for market-order feasibility)
+    totalQuoteAmount float64       // sum of size*price
+}
+// BestPrice(): for a bid side return the max key, for an ask side the min key.
+// AddOrderNode(price, node): find-or-create the deque at price, push the node.
+// RemoveOrderNode(price, node): unlink node; drop the level if its deque is empty.</code></pre>
+<span class="file-path">engine-v2/book/order_index.go &mdash; O(1) lookup by order ID</span>
+<pre><code>type OrderIndex struct {
+    index map[string]indexEntry   // orderID -&gt; {side, price, *node}
+}</code></pre>
+<span class="file-path">engine-v2/book/orderbook.go &mdash; the book ties them together</span>
+<pre><code>type OrderBook struct {
+    market      *market.MarketInfo
+    bidSide     *BookSide
+    askSide     *BookSide
+    orderIndex  *OrderIndex
+    latestPrice float64
+    snapshot    *BookSnapshot   // cached top-20 levels, refreshed every 300ms
+    obMu        sync.Mutex
+}</code></pre>
+</div>
+
+<h2 id="b5">B.5 &mdash; Step 3: the matching algorithm</h2>
+<p>This is the core. <code>PlaceOrder</code> locks the book, rejects duplicate IDs, then dispatches on order type. The rules:</p>
+<ul>
+  <li><strong>LIMIT + MAKER</strong> &rarr; rest in the book, no matching.</li>
+  <li><strong>LIMIT + TAKER</strong> &rarr; match against the opposite side while prices cross; rest any remainder.</li>
+  <li><strong>MARKET</strong> &rarr; sweep the opposite side (never rests); bid consumes by quote-amount, ask by size.</li>
+</ul>
+<div class="step">
+<span class="step-tag">STEP 3</span>
+<span class="file-path">engine-v2/book/orderbook.go</span>
+<pre><code>func (ob *OrderBook) PlaceOrder(orderType model.OrderType, order *model.Order) ([]Trade, error) {
+    if order == nil { return nil, errors.New("order cannot be nil") }
+    ob.obMu.Lock()
+    defer ob.obMu.Unlock()
+
+    if ob.orderIndex.OrderIdExist(order.ID) {
+        return nil, fmt.Errorf("%w: %s", ErrOrderExists, order.ID)
+    }
+    switch orderType {
+    case model.LIMIT:  return ob.placeLimitOrder(order)
+    case model.MARKET: return ob.placeMarketOrder(order)
+    default:           return nil, fmt.Errorf("%w: %v", ErrUnsupportedOrderType, orderType)
+    }
+}
+
+func (ob *OrderBook) placeLimitOrder(order *model.Order) ([]Trade, error) {
+    if order.Mode == model.MAKER {          // maker: just rest it
+        return nil, ob.makeLimitOrder(order)
+    }
+    trades, err := ob.takeLimitOrder(order) // taker: match, then rest remainder
+    if err != nil { return nil, err }
+    ob.updateLatestPrice(trades)
+    return trades, nil
+}</code></pre>
+<span class="file-path">the taker loop &mdash; match while the price crosses</span>
+<pre><code>func (ob *OrderBook) takeLimitOrder(order *model.Order) ([]Trade, error) {
+    var trades []Trade
+    opposite := ob.getOppositeSide(order.Side)
+
+    for order.RemainingSize &gt; 0 {
+        bestPrice, err := opposite.BestPrice()
+        if err != nil || !ob.canMatch(order.Side, order.Price, bestPrice) {
+            break   // no counter-order, or the spread no longer crosses
+        }
+        trade, shouldContinue, err := ob.executeMatch(order, opposite, bestPrice)
+        if err != nil { return trades, err }
+        trades = append(trades, trade)
+        if !shouldContinue { break }
+    }
+    if order.RemainingSize &gt; 0 {   // leftover becomes a resting maker order
+        if err := ob.makeLimitOrder(order); err != nil { return trades, err }
+    }
+    return trades, nil
+}</code></pre>
+</div>
+<p><code>canMatch</code> is the price-crossing test: a BID matches when <code>orderPrice &gt;= bestAsk</code>; an ASK matches when <code>orderPrice &lt;= bestBid</code>. <code>executeMatch</code> pops the best resting order, trades <code>min(incoming.Remaining, resting.Remaining)</code>, reduces both, emits a <code>Trade</code>, and puts the resting order back at the head of its level if it still has size. Market orders (<code>takeMarketBidOrder</code>/<code>takeMarketAskOrder</code>) first check the opposite side has enough <code>totalQuoteAmount</code>/<code>totalVolume</code>, then sweep it.</p>
+<div class="ok"><strong>Why it's fast.</strong> Best-price access is O(1) via the TreeMap's min/max, matching pops the front of a linked list (O(1)), and cancels are O(1) through the index. That is how the README benchmarks reach ~1.9M orders/sec.</div>
+
+<h2 id="b6">B.6 &mdash; Step 4: the MatchingEngine facade</h2>
+<p>One engine owns one book per market and guards the map with an <code>RWMutex</code>. It is the only thing the service layer talks to.</p>
+<div class="step">
+<span class="step-tag">STEP 4</span>
+<span class="file-path">engine-v2/core/engine.go</span>
+<pre><code>type MatchingEngine struct {
+    mu         sync.RWMutex
+    orderbooks map[string]*book.OrderBook
+}
+
+func NewMatchingEngine(markets []*market.MarketInfo) (*MatchingEngine, error) {
+    if len(markets) == 0 { return nil, errors.New("market must have at least one market") }
+    e := &amp;MatchingEngine{orderbooks: make(map[string]*book.OrderBook, len(markets))}
+    for _, m := range markets {
+        e.orderbooks[m.Name] = book.NewOrderBook(m)
+    }
+    return e, nil
+}
+
+func (e *MatchingEngine) PlaceOrder(market string, ot model.OrderType, order *model.Order) ([]book.Trade, error) {
+    ob, err := e.GetOrderBook(market)
+    if err != nil { return nil, err }
+    return ob.PlaceOrder(ot, order)
+}
+
+func (e *MatchingEngine) CancelOrder(market, orderID string) (*model.Order, error) { /* ... */ }
+func (e *MatchingEngine) RecoverOrderBook(market string, orders []*model.Order, latestPrice float64) error { /* re-insert open orders on startup */ }</code></pre>
+</div>
+<p><code>RecoverOrderBook</code> matters: the book is in-memory, so on restart the app reloads every <code>NEW</code>/<code>PARTIAL</code> order from SQLite and replays them into the book (see B.16).</p>
+
+<h2 id="b7">B.7 &mdash; Step 5: DTOs &amp; the market config</h2>
+<p>DTOs (<code>dto/</code>) are the shapes that cross layer boundaries. <code>dto.Order</code> is richer than the engine's <code>model.Order</code> (it carries <code>Market</code>, <code>Status</code>, <code>Fees</code>, timestamps) and knows how to convert to an engine order and how to serialise itself:</p>
+<div class="step">
+<span class="step-tag">STEP 5</span>
+<pre><code>// dto/orders.go (shape)
+type Order struct {
+    ID, UserID, Market string
+    Side          model.Side
+    Price, OriginalSize, RemainingSize, QuoteAmount, AvgDealtPrice float64
+    Type   model.OrderType
+    Mode   model.Mode
+    Status model.OrderStatus
+    FeeRate, Fees float64
+    FeeAsset      string
+    CreatedAt, UpdatedAt time.Time
+}
+func (o *Order) ToEngineOrder() *model.Order { /* copy fields the engine needs */ }
+func (o *Order) MarshalJSON() ([]byte, error) { /* fee_rate -&gt; "0.2000%", times -&gt; UnixMilli */ }
+
+// dto.PlaceOrderContext carries everything through the two placement phases:
+type PlaceOrderContext struct {
+    Market, UserID string
+    Request  *OrderReq
+    FeeRate  float64
+    FeeAsset string
+    OrderDTO *Order
+    Assets   *AssetDetails   // which asset to freeze + how much
+    Trades   []book.Trade    // filled in after matching
+}</code></pre>
+</div>
+<p>The static exchange configuration lives in <code>settings/</code> &mdash; this is where the 12 markets and the AMM's per-level budgets are declared:</p>
+<div class="step">
+<span class="file-path">settings/settings.go</span>
+<pre><code>func GetAllAssets() []string {
+    return []string{"USDT","BTC","ETH","DOT","ASTR","HDX","BTSE","SOL","LINK","ADA","BNB","AVAX","DOGE"}
+}
+
+var ALL_MARKETS = []*market.MarketInfo{
+    {Name: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT"},
+    {Name: "ETH-USDT", BaseAsset: "ETH", QuoteAsset: "USDT"},
+    // ... 12 markets total, all quoted in USDT
+}
+
+var MAX_QUOTE_AMT_PER_LEVEL_MAP = map[string]float64{
+    "BTC-USDT": 20000, "ETH-USDT": 4000, "SOL-USDT": 3888, /* ... */ }
+
+const MARGIN_ACCOUNT_ID       = "0"
+const INTERNAL_AMM_ACCOUNT_ID = "MID250606CXAZ1199"   // the market-maker bot's user id</code></pre>
+</div>
+
+<h2 id="b8">B.8 &mdash; Step 6: SQLite &amp; the repository layer</h2>
+<p>Persistence is plain SQL over the pure-Go SQLite driver &mdash; no ORM. The DB is a single file, opened with exactly one connection (SQLite is a single writer):</p>
+<div class="step">
+<span class="step-tag">STEP 6</span>
+<span class="file-path">db.go</span>
+<pre><code>import _ "github.com/ncruces/go-sqlite3/driver"   // blank import registers the driver
+import _ "github.com/ncruces/go-sqlite3/embed"
+
+func initDB(testMode bool) (*sql.DB, error) {
+    db, err := sql.Open("sqlite3", "/app/exg.db")
+    if err != nil { return nil, err }
+    db.SetMaxOpenConns(1)   // SQLite: one writer
+    db.SetMaxIdleConns(1)
+    if err := db.Ping(); err != nil { return nil, err }
+    if testMode {           // rebuild schema + seed mock data on every boot
+        if err := runSQLFilesWithTransaction(db); err != nil { return nil, err }
+    }
+    return db, err
+}</code></pre>
+</div>
+<p>Four tables (full DDL in <code>doc/db_schema/schema.sql</code>): <code>users</code>, <code>balances</code> (PK <code>user_id+asset</code>, with <code>available</code>/<code>locked</code>), <code>orders</code>, <code>trades</code>. Each is heavily indexed for the exact queries the app runs (user order history, active orders per market, latest price, 24h volume).</p>
+<p>Repositories are defined as interfaces (<code>repository/interface.go</code>) and implemented in <code>repository/impl/</code>. The key abstraction is <code>DBExecutor</code>, satisfied by both <code>*sql.DB</code> and <code>*sql.Tx</code>, so every method runs identically inside or outside a transaction:</p>
+<pre><code>// balances repo: the atomic money primitives the engine relies on
+LockedByUserIdAndAsset(ctx, db, userId, asset, amount)    // available -&gt; locked  (freeze)
+UnlockedByUserIdAndAsset(ctx, db, userId, asset, amount)  // locked -&gt; available  (unfreeze)
+ModifyAvailableByUserIdAndAsset(...)                      // credit/debit available
+// trades repo:
+BatchInsert(ctx, db, trades)          GetMarketLatestPrice(ctx, db, market)</code></pre>
+
+<h2 id="b9">B.9 &mdash; Step 7: the service layer &amp; two-phase order placement</h2>
+<p>The service layer is where money correctness lives. <code>orderService</code> depends only on interfaces (engine + three repos + the OHLCV trade stream):</p>
+<div class="step">
+<span class="step-tag">STEP 7</span>
+<span class="file-path">service/impl/orders.go</span>
+<pre><code>type orderService struct {
+    db               *sql.DB
+    engine           *core.MatchingEngine
+    orderRepo        repository.IOrderRepository
+    tradeRepo        repository.ITradeRepository
+    balanceRepo      repository.IBalanceRepository
+    klineTradeStream ohlcv.TradeStream
+}</code></pre>
+</div>
+<p><code>PlaceOrder</code> runs in <strong>two phases</strong>. Phase 1 is a single DB transaction: freeze funds, insert the order, run the match, persist trades, and fan the trades into the candlestick stream. Phase 2 settles balances/fees for the resulting trades.</p>
+<div class="step">
+<span class="file-path">Phase 1 &mdash; placement (atomic)</span>
+<pre><code>func (s *orderService) executeOrderPlacementPhase(ctx context.Context, orderCtx *dto.PlaceOrderContext, isMarketOrder bool) error {
+    return WithTx(ctx, s.db, func(tx *sql.Tx) error {
+        // 1. Freeze user funds (available -&gt; locked). Fails =&gt; insufficient balance.
+        if err := s.balanceRepo.LockedByUserIdAndAsset(ctx, tx,
+                orderCtx.UserID, orderCtx.Assets.FreezeAsset, orderCtx.Assets.FreezeAmt); err != nil {
+            return ErrInsufficientBalance
+        }
+        // 2. Insert the order row (status NEW).
+        if err := s.orderRepo.Insert(ctx, tx, orderCtx.OrderDTO); err != nil { return UnknownError }
+
+        // 3. Run it through the matching engine.
+        engineOrder := serviceHelper.NewEngineOrderByOrderDto(orderCtx.OrderDTO)
+        trades, err := s.engine.PlaceOrder(orderCtx.Market, orderCtx.Request.OrderType, engineOrder)
+        if err != nil { return err }
+
+        // 4. Reflect engine result back onto the DTO (remaining size, avg price).
+        orderCtx.SyncTradeResult(engineOrder, trades)
+
+        // 5. Persist trades + feed the candlestick stream.
+        if len(orderCtx.Trades) &gt; 0 {
+            if err := s.tradeRepo.BatchInsert(ctx, tx, trades); err != nil { return UnknownError }
+            for _, trade := range trades {
+                s.klineTradeStream.SyncTrade(&amp;ohlcv.Trade{
+                    Symbol: trade.Market, Price: trade.Price, Volume: trade.Size, Timestamp: trade.Timestamp})
+            }
+        }
+        // 6. Market-BID orders: rewrite original_size to what was actually bought.
+        if isMarketOrder &amp;&amp; orderCtx.Request.Side == model.BID { /* UpdateOriginalSize */ }
+        return nil
+    })
+}</code></pre>
+</div>
+<p>Because it is wrapped in <code>WithTx</code>, if <em>any</em> step fails the whole thing rolls back &mdash; the freeze, the order row and the trades all disappear together. That is the atomicity guarantee an exchange must have.</p>
+
+<h2 id="b10">B.10 &mdash; Step 8: settlement (fees, balance moves)</h2>
+<p>Phase 2 takes the trades and moves money for real. <code>serviceHelper.ProcessTradeSettlement</code> computes, per trade, how much each side's <code>locked</code> balance to release, how much of the counter-asset to credit, and the fee to deduct; the service then applies those diffs:</p>
+<div class="step">
+<span class="step-tag">STEP 8</span>
+<span class="file-path">service/impl/orders.go &rarr; serviceHelper/settlement.go</span>
+<pre><code>func (s *orderService) executeTradeSettlementPhase(ctx context.Context, orderCtx *dto.PlaceOrderContext) error {
+    if len(orderCtx.Trades) == 0 { return nil }
+    settlementResult, err := serviceHelper.ProcessTradeSettlement(orderCtx)
+    if err != nil { return err }
+
+    for _, u := range settlementResult.OrderUpdates {          // reduce remaining, add fees
+        s.orderRepo.SyncTradeMatchingResult(ctx, s.db, u.OrderID,
+            u.RemainingSizeDecreasing, u.DealtQuoteAmountIncreasing, u.FeesIncreasing)
+    }
+    for userID, settlement := range settlementResult.UserSettlements {  // credit/debit assets
+        s.updateUserAssets(ctx, s.db, userID, orderCtx.Assets, settlement)
+    }
+    return nil
+}</code></pre>
+</div>
+<p>Fees are asymmetric: makers pay less than takers (see the seeded users &mdash; maker 0.1%, taker 0.2%), captured per side on each <code>Trade</code>. Cancelling an order runs the mirror operation: remove from the engine, set status <code>CANCELED</code>, and unlock the frozen balance.</p>
+
+<h2 id="b11">B.11 &mdash; Step 9: security, middleware, controllers, router</h2>
+<p>Auth is a simple in-memory token cache (a token &rarr; user map) filled on login and cleared on logout:</p>
+<div class="step">
+<span class="step-tag">STEP 9</span>
+<span class="file-path">security/credential.go</span>
+<pre><code>type CredentialCache struct { tokenCache map[string]*dto.User }
+// login stores token-&gt;user; AuthMiddleware looks it up; logout deletes it.</code></pre>
+<span class="file-path">middleware/middleware.go</span>
+<pre><code>CORS()                 // allow the browser front-end
+ErrorHandler()         // turn gin errors into {code, message}
+RateLimitMiddleware()  // hook (currently pass-through)
+AuthMiddleware(cache)  // read Authorization header, resolve the user, put it in the context
+AdminMiddleware()      // require the Admin-Token header</code></pre>
+<span class="file-path">router.go &mdash; the full route table</span>
+<pre><code>router := gin.Default()
+router.Use(middleware.CORS(), middleware.ErrorHandler(), middleware.RateLimitMiddleware())
+router.GET("/health",  ...)                 // liveness
+router.GET("/metrics", ...)                 // Prometheus
+
+public := router.Group("/api/v1")
+{
+    public.POST("/users/register", userController.Register)
+    public.POST("/users/login",    userController.Login)
+    public.GET("/orderbooks/:market/snapshot", orderBookController.OrderbooksSnapshot)
+    public.GET("/markets",         marketDataController.GetAllMarketsData)
+    public.GET("/markets/:market", marketDataController.GetMarketsData)
+    public.GET("/markets/:market/ohlcv-history/:interval", marketDataController.GetOHLCVHistory)
+}
+
+private := router.Group("/api/v1")
+private.Use(middleware.AuthMiddleware(c.CredentialCache))
+{
+    private.GET("/users/profile", userController.GetProfile)
+    private.POST("/users/logout", userController.Logout)
+    private.GET("/balances",      balanceController.GetBalances)
+    private.POST("/orders/:market",   orderController.PlaceOrder)
+    private.DELETE("/orders/:orderId", orderController.CancelOrder)
+    private.GET("/orders",        orderController.GetOrders)
+}
+
+admin := router.Group("/admin/api/v1")
+admin.Use(middleware.AdminMiddleware())
+{
+    admin.POST("/manual-adjustment", adminController.ManualAdjustment)
+    admin.POST("/test-make-market",  adminController.TestMakeMarket)
+}</code></pre>
+</div>
+<p>Controllers are thin: they pull the authenticated user out of the Gin context, bind the JSON body to a request DTO, call the service, and shape the JSON response (<code>{code, message, timestamp, data}</code>).</p>
+
+<h2 id="b12">B.12 &mdash; Step 10: OHLCV candlestick aggregator</h2>
+<p>Every matched trade is pushed into a <code>TradeStream</code>. The <code>OHLCVAggregator</code> consumes that stream and maintains live bars per symbol per interval (15m/1h/4h/1d/1w), flushing closed bars to SQLite:</p>
+<div class="step">
+<span class="step-tag">STEP 10</span>
+<span class="file-path">ohlcv/aggregator.go</span>
+<pre><code>type OHLCVAggregator struct {
+    repo               OHLCVRepository
+    tradeStream        TradeStream
+    realtimeSymbolBars sync.Map           // symbol -&gt; *RealtimeSymbolBars
+    workerPool         *WorkerPool        // async persistence
+    tradeCh            chan *Trade
+    stopCh             chan struct{}
+}
+// Start() launches goroutines: read trade stream -&gt; update bars -&gt;
+// close bars on interval boundaries -&gt; periodic flush to DB.</code></pre>
+</div>
+<p>A bar accumulates open/high/low/close, volume and trade-count; when its interval boundary passes it is marked closed and handed to the worker pool. The <code>/markets/:market/ohlcv-history/:interval</code> endpoint serves these in TradingView's array format, and the WS <code>ohlcv</code> channel streams live updates.</p>
+
+<h2 id="b13">B.13 &mdash; Step 11: WebSocket hub</h2>
+<p>A single <code>Hub</code> goroutine owns all clients and a subscription map; it fans server events out to only the clients that asked for them:</p>
+<div class="step">
+<span class="step-tag">STEP 11</span>
+<span class="file-path">ws/hub.go &amp; startup_helper.go</span>
+<pre><code>type Hub struct {
+    clients       map[*Client]bool
+    register      chan *Client
+    unregister    chan *Client
+    subscriptions map[SubscriptionKey]map[*Client]bool  // channel+params -&gt; clients
+    mu            sync.RWMutex
+}
+// BroadcastToSubscribers(key, data) sends to everyone subscribed to that key.
+
+// the WS server runs on :8081, separate from the :8080 REST server
+func setupWebSocket(c *container.Container) {
+    go func() {
+        http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+            ws.HandleWebSocket(c.WSHub, w, r)
+        })
+        http.ListenAndServe(":8081", nil)
+    }()
+}</code></pre>
+</div>
+<p>Three channels: <code>orderbook</code> (live top-20 book per market), <code>ohlcv</code> (live candles), <code>markets</code> (24h summary for all pairs). Clients send <code>{"action":"subscribe","channel":"orderbook","params":{"market":"BTC-USDT"}}</code>.</p>
+
+<h2 id="b14">B.14 &mdash; Step 12: schedulers &amp; the AMM bot</h2>
+<p>Four schedulers implement a tiny <code>Scheduler</code> interface (<code>Start/Stop/Name/RunTimes</code>) and run on their own tickers:</p>
+<div class="step">
+<span class="step-tag">STEP 12</span>
+<table>
+<tr><th>Scheduler</th><th>Interval</th><th>Job</th></tr>
+<tr><td><code>OrderBookSnapshotScheduler</code></td><td>300 ms</td><td>refresh each book's cached top-20 snapshot</td></tr>
+<tr><td><code>MarketDataScheduler</code></td><td>30 s</td><td>compute 24h price-change &amp; volume per market, cache it</td></tr>
+<tr><td><code>LQDTScheduler</code> (AMM)</td><td>5 min</td><td>quote liquidity on every market</td></tr>
+<tr><td><code>WSDataFeederScheduler</code></td><td>event-driven</td><td>push OHLCV / orderbook / markets to WS subscribers</td></tr>
+</table>
+</div>
+<p>The <strong>AMM</strong> (<code>service/impl/amm/</code>) is what makes the empty exchange feel alive. Every 5 minutes, for each market it:</p>
+<ol>
+  <li>fetches the real index price from the BTSE public API (<code>external/index_price_api.go</code>);</li>
+  <li>reads the market-maker account's (<code>MID250606CXAZ1199</code>) balance and open orders;</li>
+  <li>computes ideal bid/ask ladders &mdash; 20 levels per side, each <code>0.1%</code> apart, capped by <code>MAX_QUOTE_AMT_PER_LEVEL_MAP</code>;</li>
+  <li>cancels stale quotes and places new ones so the book always has depth around the index price.</li>
+</ol>
+<p>That is why, the moment you start the backend with the seeded DB, all 12 markets already show a full order book and a moving price.</p>
+
+<h2 id="b15">B.15 &mdash; Step 13: the DI container</h2>
+<p>The container is the wiring diagram in code: one struct holding every repo, service, scheduler and the engine, plus an ordered set of <code>init*</code> calls. Nothing uses <code>new</code> scattered around the codebase &mdash; construction happens here, once.</p>
+<div class="step">
+<span class="step-tag">STEP 13</span>
+<span class="file-path">container/container.go</span>
+<pre><code>type Container struct {
+    DB *sql.DB
+    // Repositories
+    UserRepo repository.IUserRepository; BalanceRepo repository.IBalanceRepository
+    OrderRepo repository.IOrderRepository; TradeRepo repository.ITradeRepository
+    OHLCVRepo ohlcv.OHLCVRepository
+    // Services
+    UserService service.IUserService; OrderService service.IOrderService
+    OrderBookService service.IOrderBookService; AdminService service.IAdminService
+    MarketDataService service.IMarketDataService; BalanceService service.IBalanceService
+    // Cache / engine / schedulers / metrics / ohlcv / ws
+    CredentialCache *security.CredentialCache
+    MatchingEngine  *core.MatchingEngine
+    MarketDataScheduler, OrderBookSnapshotScheduler, LQDTScheduler, WSDataFeederScheduler scheduler.Scheduler
+    OHLCVAggregator *ohlcv.OHLCVAggregator
+    WSHub *ws.Hub
+}
+
+func NewContainer(db *sql.DB, engine *core.MatchingEngine) *Container {
+    c := &amp;Container{DB: db, MatchingEngine: engine}
+    c.CredentialCache = security.NewCredentialCache()
+    c.initRepositories()   // wire repos
+    c.initOHLCVAgg()       // candlestick aggregator + trade stream
+    c.initServices()       // inject repos into services
+    c.initWS()             // hub
+    c.initProxy()          // AMM's exchange-function proxy
+    c.initScheduler()      // the four schedulers
+    c.initMetrics()
+    return c
+}</code></pre>
+</div>
+<p>Look at <code>initServices</code> to see injection in action &mdash; each service is handed exactly the collaborators it needs, all as interfaces:</p>
+<pre><code>c.OrderService = serviceImpl.NewIOrderService(c.DB, c.MatchingEngine,
+    c.OrderRepo, c.TradeRepo, c.BalanceRepo, c.OHLCVTradeStream)</code></pre>
+
+<h2 id="b16">B.16 &mdash; Step 14: main.go &amp; startup helpers</h2>
+<p>Finally, <code>main.go</code> composes everything in the correct order. Read it top to bottom &mdash; it is the whole app in 30 lines:</p>
+<div class="step">
+<span class="step-tag">STEP 14</span>
+<span class="file-path">main.go</span>
+<pre><code>func main() {
+    initLogger("logs", log.INFO)
+
+    db, err := initDB(false)                                   // open seeded SQLite
+    if err != nil { log.Fatalf("failed to open database: %v", err) }
+
+    engine, err := core.NewMatchingEngine(settings.ALL_MARKETS) // 12 empty books
+    if err != nil { log.Fatalf("failed to init matching-engine: %v", err) }
+
+    c := container.NewContainer(db, engine)                    // wire everything
+    defer c.Cleanup()
+
+    router := setupRouter(c)                                   // REST :8080
+    setupWebSocket(c)                                          // WS   :8081 (goroutine)
+
+    if err := recoverOrderBook(c); err != nil {               // replay open orders into books
+        log.Fatalf("failed to recover orderbook: %v", err)
+    }
+    startUpAllScheduler(c)                                     // snapshot / marketdata / AMM / feeder
+
+    log.Infof("Exchange Server starting on :8080")
+    if err := router.Run(":8080"); err != nil { log.Fatal(err) }
+}</code></pre>
+</div>
+<p><code>recoverOrderBook</code> (in <code>startup_helper.go</code>) loops the markets, queries each one's <code>NEW</code>/<code>PARTIAL</code> orders, converts DTOs to engine orders and calls <code>RecoverOrderBook</code> &mdash; so a restart never loses resting liquidity. And that completes the backend: from an empty folder you now have a matching engine, a settled money layer, market data, candlesticks, live feeds and a market maker.</p>
+
+<div class="ok"><strong>You built it.</strong> The dependency order you just followed (model &rarr; book &rarr; engine &rarr; dto &rarr; repo &rarr; service &rarr; http &rarr; ohlcv/ws/scheduler &rarr; container &rarr; main) is exactly how the packages depend on each other. If it compiles bottom-up, it runs.</div>
+
+<!-- ============================================================ -->
+<!-- PART C                                                       -->
+<!-- ============================================================ -->
+<h1 id="partC">Part C &mdash; Run it, test it, see it live</h1>
+
+<h2 id="c1">C.1 &mdash; Run the backend</h2>
+<div class="note">The repo ships a <strong>pre-seeded</strong> <code>app/exg.db</code> (~16&nbsp;MB) containing the schema, test users (<code>johnny</code>, <code>shiqi</code>, <code>kai_*</code>), the <code>market_maker</code> account with large balances, and price history. With <code>initDB(false)</code> the server uses it as-is, so you get a fully populated exchange on first boot. Ganache/Ethereum is <strong>not</strong> required &mdash; the on-chain client is defined but never called in the hot path.</div>
+
+<h3>Option A &mdash; Docker (the documented path)</h3>
+<p>The <code>Dockerfile</code> builds a static binary and copies the seeded DB into <code>/app</code>:</p>
+<pre><code>$ cd crypto-exchange
+$ docker build -t exg .
+$ docker run -d --name exg -p 8080:8080 -p 8081:8081 exg
+$ curl http://localhost:8080/health          # {"status":"ok"}
+$ curl http://localhost:8080/api/v1/markets  # 12 markets with live prices</code></pre>
+
+<h3>Option B &mdash; Local Go</h3>
+<p>The DB path is hard-coded to <code>/app/exg.db</code>, so create that path once (or run via Docker). On Linux/macOS:</p>
+<pre><code>$ sudo mkdir -p /app &amp;&amp; sudo cp app/exg.db /app/exg.db &amp;&amp; sudo chown $USER /app/exg.db
+$ go run .            # or: make build &amp;&amp; ./bin/exchange
+# REST on :8080, WebSocket on :8081</code></pre>
+<div class="warn"><strong>Fresh, empty DB?</strong> To rebuild schema + seed data from SQL on every boot, temporarily switch <code>initDB(false)</code> to <code>initDB(true)</code> in <code>main.go</code> &mdash; it executes <code>doc/db_schema/schema.sql</code> then <code>testing_data.sql</code>.</div>
+
+<h2 id="c2">C.2 &mdash; Run the Vue front-end</h2>
+<p>The front-end is Vue 3 built with <strong>vue-cli-service</strong> (not Vite). It talks to the backend through one file. Point that file at wherever your backend runs:</p>
+<div class="step">
+<span class="file-path">crypto-exchange-fe/src/services/apiService.js</span>
+<pre><code>// change this to your backend host:
+const BASE_URL = 'http://localhost:8080'</code></pre>
+<span class="file-path">crypto-exchange-fe/src/services/websocketService.js</span>
+<pre><code>this.endpoints = {
+    local:  'ws://localhost:8081/ws',
+    remote: 'ws://&lt;YOUR_BACKEND_IP&gt;:8081/ws'
+}
+this.currentEndpoint = this.endpoints.local   // use local during dev</code></pre>
+</div>
+<pre><code>$ cd crypto-exchange-fe
+$ npm install
+$ npm run serve            # dev server with hot-reload, http://localhost:8080
+# (if 8080 clashes with a local backend, it will offer 8081 — accept it)</code></pre>
+<p>Open the URL it prints. You should see the markets table populate, an order book with AMM depth, a candlestick chart (lightweight-charts), and a login modal. Register a new user or log in as one of the seeded accounts, then place an order and watch it settle live.</p>
+
+<h2 id="c3">C.3 &mdash; Test methods</h2>
+<h3>Unit tests &amp; the order-book benchmarks</h3>
+<pre><code>$ go test ./...                                   # all unit tests
+$ go test -bench=. ./engine-v2/book               # the README benchmarks
+# BenchmarkMakeLimitOrder-8        ~1,978,701/s   694 ns/op
+# BenchmarkTakeLimitOrder_FullMatch ~1,882,754/s  743 ns/op
+# BenchmarkTakeMarketOrder-8       ~1,789,549/s   680 ns/op
+# BenchmarkCancelOrder-8           ~5,864,726/s   259 ns/op
+$ make test        # -race -timeout 30s ;  make coverage  # HTML report</code></pre>
+<h3>Manual API walkthrough (curl)</h3>
+<pre><code># 1. register (or log in an existing seeded user)
+$ curl -s -X POST http://localhost:8080/api/v1/users/register \
+       -H 'Content-Type: application/json' \
+       -d '{"username":"alice","password":"secret123"}'
+
+# 2. login -&gt; returns a token
+$ TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/users/login \
+       -H 'Content-Type: application/json' \
+       -d '{"username":"alice","password":"secret123"}' | jq -r '.data.token')
+
+# 3. balances (authenticated)
+$ curl -s http://localhost:8080/api/v1/balances -H "Authorization: $TOKEN"
+
+# 4. order-book snapshot (public) — AMM has already provided depth
+$ curl -s http://localhost:8080/api/v1/orderbooks/BTC-USDT/snapshot
+
+# 5. place a limit buy
+$ curl -s -X POST http://localhost:8080/api/v1/orders/BTC-USDT \
+       -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+       -d '{"side":0,"order_type":0,"mode":1,"price":65000,"size":0.01}'</code></pre>
+<p>(<code>side</code>: 0=BID/buy, 1=ASK/sell &nbsp;•&nbsp; <code>order_type</code>: 0=LIMIT, 1=MARKET &nbsp;•&nbsp; <code>mode</code>: 0=MAKER, 1=TAKER.)</p>
+
+<h2 id="c4">C.4 &mdash; Live demo: backend on a test VM, front-end on your laptop</h2>
+<p>The most convincing demo runs the backend on a remote machine and the Vue dev-server on your laptop, pointed at it:</p>
+<ol>
+  <li><strong>On the VM:</strong> build &amp; run the Docker image (Option A), exposing <code>8080</code> and <code>8081</code>. Make sure both ports are open to your laptop.</li>
+  <li><strong>On your laptop:</strong> set <code>BASE_URL = 'http://&lt;VM_IP&gt;:8080'</code> in <code>apiService.js</code> and the WS <code>remote</code> endpoint to <code>ws://&lt;VM_IP&gt;:8081/ws</code> (and select <code>remote</code>).</li>
+  <li><code>npm run serve</code> and open the printed URL. The page loads live markets, order book and candles served from the VM; placing an order round-trips to the remote matching engine.</li>
+</ol>
+<div class="note" id="live-status"><strong>This section is filled in with the concrete VM IP once the live deployment in this session is up.</strong></div>
+
+<h2 id="c5">C.5 &mdash; API &amp; WebSocket reference</h2>
+<table>
+<tr><th>Method</th><th>Path</th><th>Auth</th><th>Purpose</th></tr>
+<tr><td>GET</td><td>/health</td><td>—</td><td>liveness</td></tr>
+<tr><td>GET</td><td>/metrics</td><td>—</td><td>Prometheus metrics</td></tr>
+<tr><td>POST</td><td>/api/v1/users/register</td><td>—</td><td>create account (+ zeroed balances)</td></tr>
+<tr><td>POST</td><td>/api/v1/users/login</td><td>—</td><td>returns auth token</td></tr>
+<tr><td>GET</td><td>/api/v1/markets</td><td>—</td><td>all markets, 24h stats</td></tr>
+<tr><td>GET</td><td>/api/v1/markets/:market</td><td>—</td><td>single market stats</td></tr>
+<tr><td>GET</td><td>/api/v1/markets/:market/ohlcv-history/:interval</td><td>—</td><td>candles (15m/1h/4h/1d/1w)</td></tr>
+<tr><td>GET</td><td>/api/v1/orderbooks/:market/snapshot</td><td>—</td><td>top-20 bids/asks</td></tr>
+<tr><td>GET</td><td>/api/v1/users/profile</td><td>token</td><td>current user</td></tr>
+<tr><td>POST</td><td>/api/v1/users/logout</td><td>token</td><td>invalidate token</td></tr>
+<tr><td>GET</td><td>/api/v1/balances</td><td>token</td><td>per-asset available/locked</td></tr>
+<tr><td>POST</td><td>/api/v1/orders/:market</td><td>token</td><td>place limit/market order</td></tr>
+<tr><td>DELETE</td><td>/api/v1/orders/:orderId</td><td>token</td><td>cancel order</td></tr>
+<tr><td>GET</td><td>/api/v1/orders</td><td>token</td><td>paginated order history</td></tr>
+<tr><td>POST</td><td>/admin/api/v1/manual-adjustment</td><td>Admin-Token</td><td>credit/debit a balance</td></tr>
+<tr><td>POST</td><td>/admin/api/v1/test-make-market</td><td>Admin-Token</td><td>trigger the AMM once</td></tr>
+<tr><td>WS</td><td>ws://host:8081/ws</td><td>—</td><td>subscribe: <code>orderbook</code> / <code>ohlcv</code> / <code>markets</code></td></tr>
+</table>
+<p>All REST responses share the envelope <code>{ "code": "0000000", "message": "success", "timestamp": &lt;ms&gt;, "data": {...} }</code> where <code>code</code> <code>"0000000"</code> means success.</p>
+
+<p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. License of the original project: non-commercial use only.</p>
+
+</div>
+</body>
+</html>
