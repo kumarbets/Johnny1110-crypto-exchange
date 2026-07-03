@@ -262,6 +262,18 @@
   <li><a href="#e9">E.9 &mdash; Real-time delivery: snapshots, push vs poll, WebSocket</a></li>
   <li><a href="#e10">E.10 &mdash; How the whole thing fits together (one big mental model)</a></li>
 </ol>
+<strong>Part F &mdash; Reading the real code, line by line (annotated for beginners)</strong>
+<ol start="55">
+  <li><a href="#f1">F.1 &mdash; <code>main.go</code>: the boot sequence, one line at a time</a></li>
+  <li><a href="#f2">F.2 &mdash; The <code>Order</code> type &amp; computing status from numbers</a></li>
+  <li><a href="#f3">F.3 &mdash; The matching loop (<code>takeLimitOrder</code>) dissected</a></li>
+  <li><a href="#f4">F.4 &mdash; <code>PlaceOrder</code> &amp; the transactional placement phase</a></li>
+  <li><a href="#f5">F.5 &mdash; <code>WithTx</code>: closures, <code>defer</code>, and why it can't leak</a></li>
+  <li><a href="#f6">F.6 &mdash; A repository method: SQL behind an interface</a></li>
+  <li><a href="#f7">F.7 &mdash; The WebSocket hub: <code>select</code>, channels, fan-out</a></li>
+  <li><a href="#f8">F.8 &mdash; A scheduler: a ticker in a goroutine</a></li>
+  <li><a href="#f9">F.9 &mdash; How to read ANY Go file you've never seen (a method)</a></li>
+</ol>
 </details>
 
 <!-- ============================================================ -->
@@ -1861,6 +1873,232 @@ ASK ladder                    BID ladder
  you ◀─WebSocket── snapshot / your orders ◀── feeder ◀── (schedulers refresh, AMM quotes)
 </pre></div>
 <p>Every box in that diagram is a folder you can open (Part&nbsp;A.21 explains why they're split that way), every arrow is a function you can read (Part&nbsp;B builds them in order), and every design choice has a reason you now know (this Part&nbsp;E). If a piece ever feels like magic, it isn't &mdash; it's one of these ten ideas wearing a Go costume. Re-read the relevant section, find the folder, read the types, then the functions. That is how you understand <em>any</em> codebase, not just this one.</p>
+
+<!-- ============================================================ -->
+<!-- PART F — reading the real code, line by line                 -->
+<!-- ============================================================ -->
+<h1 id="partF">Part F &mdash; Reading the real code, line by line</h1>
+<p>Concepts (Part&nbsp;E) are half the battle; the other half is <em>reading Go without flinching</em>. Below we take the actual functions and annotate them almost line by line, in plain English, assuming you're still new to the language. Every snippet is real code from the repo. Read the code, then the notes under it, then the code again &mdash; it clicks on the second pass.</p>
+
+<h2 id="f1">F.1 &mdash; <code>main.go</code>: the boot sequence</h2>
+<span class="file-path">crypto-exchange/main.go</span>
+<pre><code>func main() {
+    initLogger("logs", log.INFO)                              // 1
+
+    db, err := initDB(false)                                  // 2
+    if err != nil { log.Fatalf("failed to open database: %v", err) }
+
+    engine, err := core.NewMatchingEngine(settings.ALL_MARKETS) // 3
+    if err != nil { log.Fatalf("failed to init matching-engine: %v", err) }
+
+    c := container.NewContainer(db, engine)                   // 4
+    defer c.Cleanup()                                         // 5
+
+    router := setupRouter(c)                                  // 6
+    setupWebSocket(c)                                         // 7
+
+    if err := recoverOrderBook(c); err != nil {              // 8
+        log.Fatalf("failed to recover orderbook: %v", err)
+    }
+    startUpAllScheduler(c)                                    // 9
+
+    log.Infof("Exchange Server starting on :8080")
+    if err := router.Run(":8080"); err != nil { log.Fatal(err) } // 10
+}</code></pre>
+<ol>
+  <li><strong>Logging first</strong> so everything after this is recorded (to stdout <em>and</em> a daily file).</li>
+  <li><strong>Open the database.</strong> <code>db, err := ...</code> is Go's universal "result, error" pattern (Part&nbsp;A.6). The very next line checks <code>err</code> &mdash; you'll type that <code>if err != nil</code> a thousand times. <code>log.Fatalf</code> prints and <em>exits</em>: no database, no exchange.</li>
+  <li><strong>Build the matching engine</strong> with the 12 markets. It's now holding 12 empty order books.</li>
+  <li><strong>The container wires everything</strong> (repos, services, schedulers) &mdash; construction happens in exactly one place (Part&nbsp;A.20 #7).</li>
+  <li><strong><code>defer c.Cleanup()</code></strong> &mdash; <code>defer</code> means "run this when <code>main</code> returns," i.e. on shutdown. It's Go's way to guarantee cleanup no matter how the function exits.</li>
+  <li>&amp; <strong>7. Set up the two servers</strong>: REST on :8080 (built here, started at step&nbsp;10) and WebSocket on :8081 (started immediately inside a goroutine).</li>
+  <li><strong>Rebuild the book from disk</strong> (E.8): replay every open order so a restart doesn't lose liquidity.</li>
+  <li><strong>Start the background jobs</strong> (snapshots, market data, the AMM, the WS feeder).</li>
+  <li><strong><code>router.Run(":8080")</code> blocks forever</strong>, serving HTTP. <code>main</code> parks here until the process is killed &mdash; then the <code>defer</code> from step&nbsp;5 fires.</li>
+</ol>
+<div class="note">Read this and you've read the whole app's skeleton. Everything else hangs off one of these ten lines.</div>
+
+<h2 id="f2">F.2 &mdash; The <code>Order</code> type &amp; status-from-numbers</h2>
+<span class="file-path">crypto-exchange/engine-v2/model/order.go</span>
+<pre><code>func (o *Order) GetStatus() OrderStatus {
+    if o.OriginalSize == o.RemainingSize { return ORDER_STATUS_NEW }      // nothing filled yet
+    if o.RemainingSize &lt;= utils.Scale    { return ORDER_STATUS_FILLED }   // ~0 left => done
+    if o.RemainingSize &gt; 0 &amp;&amp; o.RemainingSize &lt; o.OriginalSize {
+        return ORDER_STATUS_PARTIAL                                       // some left
+    }
+    return ORDER_STATUS_CANCELED
+}</code></pre>
+<ul>
+  <li><code>func (o *Order) GetStatus()</code> &mdash; the <code>(o *Order)</code> part is the <em>receiver</em>: this is a <strong>method</strong> on <code>Order</code>, called as <code>myOrder.GetStatus()</code>. The <code>*</code> means it receives a <em>pointer</em> (Part&nbsp;A.10), so it reads the real order, not a copy.</li>
+  <li><strong>Status is computed, never stored.</strong> The order only tracks two numbers &mdash; how big it was (<code>OriginalSize</code>) and how much is left (<code>RemainingSize</code>). Everything else is derived. One source of truth means the status can never disagree with the sizes.</li>
+  <li><code>utils.Scale</code> is a tiny epsilon (0.00000001). Floating-point math leaves dust; "&le; a speck" counts as fully filled. This is a classic money-code guard you'll see everywhere.</li>
+</ul>
+
+<h2 id="f3">F.3 &mdash; The matching loop, dissected</h2>
+<span class="file-path">crypto-exchange/engine-v2/book/orderbook.go</span>
+<pre><code>func (ob *OrderBook) takeLimitOrder(order *model.Order) ([]Trade, error) {
+    var trades []Trade                              // 1
+    opposite := ob.getOppositeSide(order.Side)      // 2
+
+    for order.RemainingSize &gt; 0 {                    // 3
+        bestPrice, err := opposite.BestPrice()      // 4
+        if err != nil || !ob.canMatch(order.Side, order.Price, bestPrice) {
+            break                                   // 5
+        }
+        trade, shouldContinue, err := ob.executeMatch(order, opposite, bestPrice) // 6
+        if err != nil { return trades, err }
+        trades = append(trades, trade)              // 7
+        if !shouldContinue { break }
+    }
+
+    if order.RemainingSize &gt; 0 {                     // 8
+        if err := ob.makeLimitOrder(order); err != nil { return trades, err }
+    }
+    return trades, nil                              // 9
+}</code></pre>
+<ol>
+  <li><code>var trades []Trade</code> &mdash; an empty, growable list (a <em>slice</em>, Part&nbsp;A.8). We'll append each fill.</li>
+  <li>A buy matches against the <em>ask</em> side and vice-versa, so grab the <strong>opposite</strong> ladder.</li>
+  <li><strong>The loop:</strong> keep going while the incoming order still has quantity to fill.</li>
+  <li>Peek the best (most competitive) price on the opposite side.</li>
+  <li><strong>The exit test:</strong> stop if there's nothing left to match against (<code>err</code>) <em>or</em> the prices no longer cross (<code>canMatch</code> false &mdash; a buy only fills at asks &le; its limit). <code>break</code> leaves the loop.</li>
+  <li><strong>Do one fill:</strong> trade the smaller of the two quantities, reduce both orders, build a <code>Trade</code>. <code>shouldContinue</code> tells us whether the opposite order was fully consumed (keep going) or only partly (it's still best; but the incoming order must be done).</li>
+  <li><code>append(trades, trade)</code> &mdash; add this fill to the results.</li>
+  <li><strong>After the loop:</strong> any unfilled remainder becomes a resting maker order (this is the leftover 0.2 from the E.3 example).</li>
+  <li>Return the list of fills and <code>nil</code> error (success).</li>
+</ol>
+<p>That's the entire heart of the exchange &mdash; a <code>for</code> loop that pops the best opposite order until it can't. Everything else is plumbing around this.</p>
+
+<h2 id="f4">F.4 &mdash; <code>PlaceOrder</code> &amp; the placement phase</h2>
+<span class="file-path">crypto-exchange/service/impl/orders.go</span>
+<pre><code>func (s *orderService) executeOrderPlacementPhase(ctx context.Context, orderCtx *dto.PlaceOrderContext, isMarketOrder bool) error {
+    return WithTx(ctx, s.db, func(tx *sql.Tx) error {                          // A
+        if err := s.balanceRepo.LockedByUserIdAndAsset(ctx, tx,
+                orderCtx.UserID, orderCtx.Assets.FreezeAsset, orderCtx.Assets.FreezeAmt); err != nil {
+            return ErrInsufficientBalance                                     // B
+        }
+        if err := s.orderRepo.Insert(ctx, tx, orderCtx.OrderDTO); err != nil { // C
+            return UnknownError
+        }
+        engineOrder := serviceHelper.NewEngineOrderByOrderDto(orderCtx.OrderDTO)
+        trades, err := s.engine.PlaceOrder(orderCtx.Market, orderCtx.Request.OrderType, engineOrder) // D
+        if err != nil { return err }
+        orderCtx.SyncTradeResult(engineOrder, trades)                         // E
+        if len(orderCtx.Trades) &gt; 0 {
+            if err := s.tradeRepo.BatchInsert(ctx, tx, trades); err != nil { return UnknownError } // F
+            for _, trade := range trades {
+                s.klineTradeStream.SyncTrade(&amp;ohlcv.Trade{ /* symbol, price, size, ts */ }) // G
+            }
+        }
+        return nil                                                           // H
+    })
+}</code></pre>
+<ol type="A">
+  <li><strong>Everything runs inside one transaction.</strong> We pass a <em>function</em> to <code>WithTx</code> (F.5). If that function returns an error anywhere, the whole thing rolls back.</li>
+  <li><strong>Freeze</strong> the funds (E.5 Beat&nbsp;1). If it fails, return <code>ErrInsufficientBalance</code> &mdash; and because we're in <code>WithTx</code>, nothing is written.</li>
+  <li><strong>Insert</strong> the order row (status NEW).</li>
+  <li><strong>Match</strong> in the engine &mdash; this is the loop from F.3. Returns the trades.</li>
+  <li><strong>Sync</strong> the results back onto the DTO (remaining size, average price).</li>
+  <li><strong>Persist the trades</strong> in one batch (fewer round-trips).</li>
+  <li><strong>Feed the candlestick stream</strong> so charts update &mdash; note <code>&amp;ohlcv.Trade{...}</code>, the <code>&amp;</code> makes a pointer to a fresh struct (Part&nbsp;A.10).</li>
+  <li>Return <code>nil</code> &rarr; commit. The freeze, the order and the trades all become permanent together, or not at all.</li>
+</ol>
+
+<h2 id="f5">F.5 &mdash; <code>WithTx</code>: closures, <code>defer</code>, and why it can't leak</h2>
+<span class="file-path">crypto-exchange/service/impl/txn.go</span>
+<pre><code>func WithTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) (err error) {
+    tx, err := db.BeginTx(ctx, nil)              // 1 open a transaction
+    if err != nil { return err }
+
+    defer func() {                               // 2 runs no matter how we leave
+        if p := recover(); p != nil {            // 3 a panic happened
+            tx.Rollback(); panic(p)
+        } else if err != nil {                   // 4 fn returned an error
+            tx.Rollback()
+        } else {                                 // 5 clean success
+            err = tx.Commit()
+        }
+    }()
+
+    err = fn(tx)                                 // 6 run YOUR code
+    return
+}</code></pre>
+<ul>
+  <li><code>fn func(tx *sql.Tx) error</code> &mdash; the last parameter is <strong>a function</strong>. In Go, functions are values you can pass around (Part&nbsp;A.19). The caller (F.4) hands in its writes as this <code>fn</code>.</li>
+  <li><strong>The <code>defer</code> is the whole trick.</strong> It schedules an anonymous function to run <em>when <code>WithTx</code> returns, however it returns</em> &mdash; normal, error, or even a panic.</li>
+  <li>3&ndash;5 are the three ways to leave: a <strong>panic</strong> (rollback, then re-panic), an <strong>error</strong> (rollback), or <strong>success</strong> (commit). Exactly one happens.</li>
+  <li>Because rollback/commit lives in a <code>defer</code>, <strong>you physically cannot forget it</strong> &mdash; that's the safety this pattern buys. Note the named return <code>(err error)</code>: the deferred function reads and even overwrites <code>err</code> (with the commit's error).</li>
+</ul>
+
+<h2 id="f6">F.6 &mdash; A repository method: SQL behind an interface</h2>
+<p>The service called <code>balanceRepo.LockedByUserIdAndAsset(...)</code>. Under that interface, the implementation is hand-written SQL that atomically moves money from <em>available</em> to <em>locked</em> &mdash; but only if there's enough:</p>
+<pre><code>// shape of the impl (repository/impl/balances.go)
+UPDATE balances
+   SET available = available - ?,      -- take from spendable
+       locked    = locked    + ?       -- reserve it
+ WHERE user_id = ? AND asset = ?
+   AND available &gt;= ?                  -- ... only if it's actually there</code></pre>
+<ul>
+  <li>The <code>?</code> are <strong>bound parameters</strong> &mdash; values are passed separately, never string-concatenated, which is how you avoid SQL-injection.</li>
+  <li>The <code>AND available &gt;= ?</code> makes the check-and-move <strong>one atomic step</strong> in the database. That's what actually prevents the double-spend race from E.6 at the storage layer: the database won't update a row that no longer qualifies.</li>
+  <li>The method takes a <code>DBExecutor</code> (satisfied by both <code>*sql.DB</code> and <code>*sql.Tx</code>), so the <em>same</em> code runs inside the placement transaction or standalone (Part&nbsp;A.20 #2).</li>
+</ul>
+
+<h2 id="f7">F.7 &mdash; The WebSocket hub: <code>select</code>, channels, fan-out</h2>
+<span class="file-path">crypto-exchange/ws/hub.go</span>
+<pre><code>func (h *Hub) Run(ctx context.Context) {
+    for {
+        select {                                  // 1 wait for whichever happens first
+        case &lt;-ctx.Done():                        // 2 shutdown signal
+            return
+        case client := &lt;-h.register:             // 3 a browser connected
+            h.clients[client] = true
+        case client := &lt;-h.unregister:           // 4 a browser left / was dropped
+            delete(h.clients, client)
+            close(client.Send)
+        case message := &lt;-h.broadcast:           // 5 send to everyone
+            for client := range h.clients { client.Send &lt;- message }
+        }
+    }
+}</code></pre>
+<ul>
+  <li><strong><code>select</code> is Go's "wait on several channels at once."</strong> It blocks until <em>one</em> of the cases can proceed, runs that case, and loops. It's the event loop of the hub.</li>
+  <li>The four cases are the four things that can happen to the hub: shutdown, a client joins, a client leaves, or there's a message to broadcast. One goroutine owns all client bookkeeping, so there's <strong>no lock needed for the client map</strong> &mdash; only this goroutine touches it. (Sharing by communicating, not by locking.)</li>
+  <li><code>client.Send &lt;- message</code> pushes onto <em>that client's</em> outbound channel; a separate per-client goroutine drains it to the socket. If a client is too slow and its buffer fills, the hub drops it (and the browser reconnects &mdash; a bug we hardened in this copy, see Part&nbsp;D/E.9).</li>
+</ul>
+
+<h2 id="f8">F.8 &mdash; A scheduler: a ticker in a goroutine</h2>
+<span class="file-path">crypto-exchange/scheduler/ws_data_feeder.go</span>
+<pre><code>func (W *WSDataFeederJob) Start() error {
+    go func() {                                   // 1 run in the background
+        ticker := time.NewTicker(1 * time.Second) // 2 fire every second
+        defer ticker.Stop()
+        for range ticker.C {                      // 3 each tick...
+            for _, key := range W.wsHub.GetSubscriptionKeys() {
+                go W.collectAndSend(key)          // 4 push each channel's data
+            }
+        }
+    }()
+    return nil
+}</code></pre>
+<ul>
+  <li><code>go func(){ ... }()</code> &mdash; launch this work on a <strong>goroutine</strong> so <code>Start</code> returns immediately and the loop runs forever in the background.</li>
+  <li><code>time.NewTicker</code> gives a channel (<code>ticker.C</code>) that receives a value every second &mdash; a heartbeat.</li>
+  <li><code>for range ticker.C</code> &mdash; "do the body once per tick." A <code>range</code> over a channel loops each time a value arrives.</li>
+  <li>For each active subscription, push its latest data (order book snapshot, candle, your orders). The inner <code>go</code> means one slow channel can't hold up the others. This is the whole real-time push loop from E.9.</li>
+</ul>
+
+<h2 id="f9">F.9 &mdash; How to read ANY Go file you've never seen</h2>
+<p>The repeatable method &mdash; it works on this repo and every other:</p>
+<ol>
+  <li><strong>Read the <code>package</code> line and imports.</strong> The package name is the folder's job; the imports tell you what it leans on (a leaf package like <code>utils</code> imports almost nothing; <code>main</code> imports everything).</li>
+  <li><strong>Read the <code>type</code> declarations first &mdash; the nouns.</strong> Structs are the data; interfaces are the contracts. You now know <em>what</em> the file is about before any logic.</li>
+  <li><strong>Read the <code>New&hellip;</code> constructor.</strong> It shows what the thing needs to exist (its dependencies).</li>
+  <li><strong>Read the exported methods &mdash; the verbs.</strong> Capitalised names are the public surface; lowercase are private helpers you can skim later.</li>
+  <li><strong>Follow one path end-to-end.</strong> Pick a single feature (place an order) and trace it controller &rarr; service &rarr; engine &rarr; repo, jumping to each function's definition. One full trace teaches more than reading every file.</li>
+  <li><strong>Lean on the compiler and tests.</strong> <code>go build ./...</code> catches your misunderstandings instantly; the <code>_test.go</code> files are worked examples of how a type is meant to be used.</li>
+</ol>
+<div class="note"><strong>You now have the full toolkit.</strong> Part&nbsp;A taught the language, Part&nbsp;B built the app, Part&nbsp;D showed the real-world changes, Part&nbsp;E the concepts, and Part&nbsp;F how to read the code. Open the repo, pick <code>main.go</code>, and use the F.9 method &mdash; nothing in it should feel like magic anymore.</div>
 
 <p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents the changes made in this working copy &mdash; SQLite WAL tuning; a WebSocket-first data flow with a private <code>user_data</code> channel; system-level orders/trades counters; a 1-minute OHLCV interval; a read-only DB viewer; and the measured throughput behind them. License of the original project: non-commercial use only.</p>
 
