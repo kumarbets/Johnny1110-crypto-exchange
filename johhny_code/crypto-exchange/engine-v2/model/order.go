@@ -1,9 +1,8 @@
 package model
 
 import (
-	"time"
-
 	"github.com/johnny1110/crypto-exchange/utils"
+	"time"
 )
 
 type Side int

@@ -2,7 +2,6 @@ package util
 
 import (
 	"errors"
-
 	"github.com/johnny1110/crypto-exchange/engine-v2/model"
 )
 
