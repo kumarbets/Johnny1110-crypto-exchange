@@ -4,10 +4,11 @@ class WebSocketService {
         this.ws = null
         this.isConnected = false
         this.reconnectAttempts = 0
-        this.maxReconnectAttempts = 5
-        this.reconnectDelay = 3000 // 3 seconds
+        this.maxReconnectAttempts = 9999 // effectively always retry (demo should self-heal after any drop)
+        this.reconnectDelay = 2000
         this.subscribers = new Map() // 儲存訂閱回調函數
         this.messageQueue = [] // 連線前的訊息佇列
+        this.activeSubs = new Map() // active subscription messages, replayed on reconnect
 
         // WebSocket 端點配置
         this.endpoints = {
@@ -34,12 +35,16 @@ class WebSocketService {
                 this.ws = new WebSocket(this.currentEndpoint)
 
                 this.ws.onopen = () => {
-                    console.log('WebSocket 連線成功:', this.currentEndpoint)
+                    console.log('WebSocket connected:', this.currentEndpoint)
                     this.isConnected = true
                     this.reconnectAttempts = 0
 
                     // 處理佇列中的訊息
                     this.processMessageQueue()
+
+                    // CRITICAL: a reconnected socket is a fresh server-side client with NO
+                    // subscriptions, so replay every active subscription or all channels go silent.
+                    this.resubscribeAll()
 
                     resolve()
                 }
@@ -88,16 +93,15 @@ class WebSocketService {
      */
     attemptReconnect() {
         this.reconnectAttempts++
-        console.log(`嘗試重新連線 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
+        console.log(`WS reconnecting (attempt ${this.reconnectAttempts})...`)
 
+        // capped backoff: 2s, 4s, 6s, ... max 8s — keep retrying so the UI self-heals
+        const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 8000)
         setTimeout(() => {
             this.connect().catch(error => {
-                console.error('重新連線失敗:', error)
-                if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-                    console.error('已達到最大重連次數，停止重連')
-                }
+                console.error('WS reconnect failed:', error)
             })
-        }, this.reconnectDelay * this.reconnectAttempts)
+        }, delay)
     }
 
     /**
@@ -115,18 +119,35 @@ class WebSocketService {
      * @param {Object} message - 要發送的訊息
      */
     sendMessage(message) {
+        // Track active subscriptions so they can be replayed after a reconnect.
+        if (message && message.action === 'subscribe') {
+            if (!this.activeSubs) this.activeSubs = new Map()
+            this.activeSubs.set(message.channel + ':' + JSON.stringify(message.params || {}), message)
+        } else if (message && message.action === 'unsubscribe' && this.activeSubs) {
+            this.activeSubs.delete(message.channel + ':' + JSON.stringify(message.params || {}))
+        }
+
         if (!this.isConnected || !this.ws) {
-            console.log('WebSocket 未連線，訊息加入佇列:', message)
+            console.log('WebSocket not connected, queueing:', message)
             this.messageQueue.push(message)
             return
         }
 
         try {
             this.ws.send(JSON.stringify(message))
-            console.log('發送 WebSocket 訊息:', message)
         } catch (error) {
-            console.error('發送 WebSocket 訊息失敗:', error)
+            console.error('WebSocket send failed:', error)
         }
+    }
+
+    // Re-send every active subscription (called on (re)connect). The server keeps no
+    // subscription memory across connections, so this must run after every onopen.
+    resubscribeAll() {
+        if (!this.activeSubs || !this.ws) return
+        this.activeSubs.forEach((message) => {
+            try { this.ws.send(JSON.stringify(message)) } catch (e) { console.error('resubscribe failed:', e) }
+        })
+        if (this.activeSubs.size > 0) console.log(`re-sent ${this.activeSubs.size} WS subscriptions after reconnect`)
     }
 
     /**

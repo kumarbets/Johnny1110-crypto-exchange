@@ -54,14 +54,15 @@ func (W *WSDataFeederJob) Start() error {
 			}
 		}
 	}()
-	// Fast loop (400ms) for the order book AND the live candle, so price movement looks
-	// smooth/heavy on both. Both are in-memory reads (no DB), unlike the 1s user_data.
+	// Fast loop (400ms) for the order book only — small in-memory snapshot, safe to push
+	// often. The candle (ohlcv) stays on the 1s loop: a 1-minute bar doesn't need 400ms
+	// updates, and keeping the per-client message rate low avoids send-buffer back-pressure.
 	go func() {
 		ticker := time.NewTicker(400 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
 			for _, key := range W.wsHub.GetSubscriptionKeys() {
-				if key.Channel == ws.ORDERBOOK || key.Channel == ws.OHLCV {
+				if key.Channel == ws.ORDERBOOK {
 					go W.collectAndSend(key)
 				}
 			}

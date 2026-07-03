@@ -24,7 +24,7 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub) *Client {
 	return &Client{
 		ID:            id,
 		Conn:          conn,
-		Send:          make(chan []byte, 256),
+		Send:          make(chan []byte, 1024), // headroom so a brief client stall doesn't get it dropped
 		Subscriptions: make(map[SubscriptionKey]bool),
 		Hub:           hub,
 	}
