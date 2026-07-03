@@ -176,9 +176,15 @@ func (c *Container) initOHLCVAgg() {
 	allSymbolNames := make([]string, 0, len(settings.ALL_MARKETS))
 	for _, symbol := range settings.ALL_MARKETS {
 		initPrice, err := external.GetIndexPrice(ctx, symbol.Name)
-		if err != nil {
-			log.Printf("[OHLCVAggregator] initOHLCVAgg GetIndexPrice err: %v", err)
-			initPrice = 0.01
+		if err != nil || initPrice <= 1 {
+			// The BTSE index API is blocked from datacenter IPs (returns 403 / 0.01).
+			// Fall back to the last traded price so the FIRST candle is sane rather than a
+			// 0.01 bar whose low permanently wrecks the chart's price scale.
+			if lp, e := c.TradeRepo.GetMarketLatestPrice(ctx, c.DB, symbol.Name); e == nil && lp > 1 {
+				initPrice = lp
+			} else {
+				initPrice = 65000
+			}
 		}
 
 		err = c.OHLCVAggregator.AddSymbol(

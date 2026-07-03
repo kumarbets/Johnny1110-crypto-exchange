@@ -23,14 +23,18 @@ class WebSocketService {
      * @param {string} endpoint - 'local' 或 'remote'
      */
     connect(endpoint = 'remote') {
-        if (this.ws && this.isConnected) {
-            console.log('WebSocket 已連線')
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             return Promise.resolve()
+        }
+        // Reuse an in-flight attempt so two components calling connect() at once don't
+        // open a second socket (which left subscribes being sent on a CONNECTING socket).
+        if (this.connectPromise) {
+            return this.connectPromise
         }
 
         this.currentEndpoint = this.endpoints[endpoint] || this.endpoints.remote
 
-        return new Promise((resolve, reject) => {
+        this.connectPromise = new Promise((resolve, reject) => {
             try {
                 this.ws = new WebSocket(this.currentEndpoint)
 
@@ -38,13 +42,14 @@ class WebSocketService {
                     console.log('WebSocket connected:', this.currentEndpoint)
                     this.isConnected = true
                     this.reconnectAttempts = 0
-
-                    // 處理佇列中的訊息
-                    this.processMessageQueue()
+                    this.connectPromise = null
 
                     // CRITICAL: a reconnected socket is a fresh server-side client with NO
                     // subscriptions, so replay every active subscription or all channels go silent.
                     this.resubscribeAll()
+
+                    // then flush anything queued while disconnected
+                    this.processMessageQueue()
 
                     resolve()
                 }
@@ -59,33 +64,38 @@ class WebSocketService {
                 }
 
                 this.ws.onclose = (event) => {
-                    console.log('WebSocket 連線關閉:', event.code, event.reason)
+                    console.log('WebSocket closed:', event.code, event.reason)
                     this.isConnected = false
+                    this.connectPromise = null
 
-                    // 如果不是主動關閉，嘗試重連
+                    // reconnect on any non-clean close
                     if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
                         this.attemptReconnect()
                     }
                 }
 
                 this.ws.onerror = (error) => {
-                    console.error('WebSocket 連線錯誤:', error)
+                    console.error('WebSocket error:', error)
                     this.isConnected = false
+                    this.connectPromise = null
                     reject(error)
                 }
 
-                // 連線超時處理
+                // connection timeout
                 setTimeout(() => {
                     if (!this.isConnected) {
-                        reject(new Error('WebSocket 連線超時'))
+                        this.connectPromise = null
+                        reject(new Error('WebSocket connect timeout'))
                     }
-                }, 10000) // 10 秒超時
+                }, 10000)
 
             } catch (error) {
-                console.error('建立 WebSocket 連線失敗:', error)
+                console.error('WebSocket create failed:', error)
+                this.connectPromise = null
                 reject(error)
             }
         })
+        return this.connectPromise
     }
 
     /**
@@ -127,8 +137,9 @@ class WebSocketService {
             this.activeSubs.delete(message.channel + ':' + JSON.stringify(message.params || {}))
         }
 
-        if (!this.isConnected || !this.ws) {
-            console.log('WebSocket not connected, queueing:', message)
+        // Only send on an OPEN socket; otherwise queue (a CONNECTING socket throws and
+        // would drop the message). onopen flushes the queue.
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             this.messageQueue.push(message)
             return
         }
@@ -137,13 +148,14 @@ class WebSocketService {
             this.ws.send(JSON.stringify(message))
         } catch (error) {
             console.error('WebSocket send failed:', error)
+            this.messageQueue.push(message) // retry on next open
         }
     }
 
     // Re-send every active subscription (called on (re)connect). The server keeps no
     // subscription memory across connections, so this must run after every onopen.
     resubscribeAll() {
-        if (!this.activeSubs || !this.ws) return
+        if (!this.activeSubs || !this.ws || this.ws.readyState !== WebSocket.OPEN) return
         this.activeSubs.forEach((message) => {
             try { this.ws.send(JSON.stringify(message)) } catch (e) { console.error('resubscribe failed:', e) }
         })

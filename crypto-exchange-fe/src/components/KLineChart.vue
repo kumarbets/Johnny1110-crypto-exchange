@@ -92,6 +92,11 @@ function transformData(raw) {
 }
 
 async function fetchData(market, interval) {
+  // guard: the chart child can mount before the parent sets `market`; an empty market
+  // produces /markets//ohlcv-history/... -> 400. The watch re-fetches once market is set.
+  if (!market || !interval) {
+    return {candleData: [], volumeData: []}
+  }
   try {
     const res = await ohlcvAPI.getOhlcvHistory(market, interval)
     if (res?.data?.code === '0000000' && res.data?.data?.t) {

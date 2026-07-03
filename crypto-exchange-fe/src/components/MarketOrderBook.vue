@@ -378,6 +378,17 @@ export default {
     };
   },
 
+  created() {
+    // Set market from the route BEFORE child components (the chart) mount, so they never
+    // fetch/subscribe with an empty market (which caused /markets//ohlcv-history 400s).
+    const m = this.$route.params.marketName
+    if (m) {
+      this.market = m
+      const a = m.split('-')
+      this.baseAsset = a[0]
+      this.quoteAsset = a[1]
+    }
+  },
   async mounted() {
     const marketName = this.$route.params.marketName // 從路由中取得參數
     if (!marketName) {

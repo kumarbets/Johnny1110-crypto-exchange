@@ -77,6 +77,13 @@ func initDB(testMode bool) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ensure ohlcv_1min table: %w", err)
 	}
 
+	// Purge garbage candles seeded from the 0.01 index-price fallback: a single bar with
+	// low_price ~0.01 stretches the chart's price axis from 0.01 to ~65000 and makes it
+	// look frozen. Safe here because every demo market trades far above 0.02.
+	for _, t := range []string{"ohlcv_1min", "ohlcv_15min", "ohlcv_1h", "ohlcv_1d", "ohlcv_1w"} {
+		db.Exec("DELETE FROM " + t + " WHERE low_price <= 0.02 OR open_price <= 0.02")
+	}
+
 	// Seed the system-wide orders/trades counters from the DB so the UI shows the
 	// true historical totals (they then grow live as new orders/trades happen).
 	seedSystemCounters(db)
