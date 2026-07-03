@@ -272,15 +272,15 @@ class WebSocketService {
         }
         this.subscribers.get('orderbook').push(callback)
 
-        // 發送訂閱訊息
+        // 發送訂閱訊息 (backend expects { market }, not { symbol })
         const subscribeMessage = {
             action: 'subscribe',
             channel: 'orderbook',
-            params: { symbol }
+            params: { market: symbol }
         }
 
         this.sendMessage(subscribeMessage)
-        console.log(`訂閱 Orderbook: ${symbol}`)
+        console.log(`subscribe orderbook: ${symbol}`)
 
         // 返回取消訂閱函數
         return () => this.unsubscribeOrderbook(symbol, callback)
@@ -301,11 +301,11 @@ class WebSocketService {
         const unsubscribeMessage = {
             action: 'unsubscribe',
             channel: 'orderbook',
-            params: { symbol }
+            params: { market: symbol }
         }
 
         this.sendMessage(unsubscribeMessage)
-        console.log(`取消訂閱 Orderbook: ${symbol}`)
+        console.log(`unsubscribe orderbook: ${symbol}`)
     }
 
     /**

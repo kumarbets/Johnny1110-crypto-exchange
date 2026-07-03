@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"io"
+	"math"
 	"math/rand"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,32 +30,14 @@ func main() {
 	client := &http.Client{Timeout: 10 * time.Second}
 	var wg sync.WaitGroup
 
-	// Shared drifting mid: every generator polls the live traded price and anchors its
-	// orders to it. Because trades move the price and everyone follows it, the whole book
-	// walks up/down together -> heavy, visible movement (not a book pinned to a fixed mid).
-	var curMid int64
-	atomic.StoreInt64(&curMid, int64(*mid))
-	go func() {
-		cl := &http.Client{Timeout: 3 * time.Second}
-		snapURL := *base + "/api/v1/orderbooks/" + *market + "/snapshot"
-		for {
-			time.Sleep(300 * time.Millisecond)
-			resp, err := cl.Get(snapURL)
-			if err != nil {
-				continue
-			}
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			s := string(b)
-			if i := strings.Index(s, `"latest_price":`); i >= 0 {
-				var lp float64
-				fmt.Sscanf(s[i+len(`"latest_price":`):], "%f", &lp)
-				if lp > 1000 {
-					atomic.StoreInt64(&curMid, int64(lp))
-				}
-			}
-		}
-	}()
+	// Shared moving target: every generator computes the SAME price wave from the wall
+	// clock, so they all push the book toward it together -> the price genuinely trends
+	// up and down in visible waves (anchoring to the live price just mean-reverts and
+	// barely moves). wave(t) = mid + big slow wave + smaller faster ripple.
+	waveAt := func() float64 {
+		t := float64(time.Now().UnixNano()) / 1e9
+		return *mid + 400*math.Sin(t/12.0) + 120*math.Sin(t/3.3)
+	}
 
 	worker := func() {
 		defer wg.Done()
@@ -65,11 +46,8 @@ func main() {
 			if *delayms > 0 {
 				time.Sleep(time.Duration(*delayms) * time.Millisecond)
 			}
-			side := rng.Intn(2) // 0 buy, 1 sell
-			anchor := float64(atomic.LoadInt64(&curMid))
-			if anchor < 1000 {
-				anchor = *mid // fallback (e.g. right after a reset, before any trade)
-			}
+			side := rng.Intn(2)   // 0 buy, 1 sell
+			anchor := waveAt()    // shared time-based price wave (all generators agree)
 			var body string
 			if rng.Intn(100) < *mktPct {
 				// MARKET order: buy consumes quote_amount, sell consumes size
