@@ -835,7 +835,7 @@ func (d *OrderNodeDeque) QuoteAmount() float64 {
 </div>
 </div>
 <div class="filecard">
-<div class="file-path">engine-v2/book/book_side.go <span class="lc">159 lines &middot; built in 13 pieces</span></div>
+<div class="file-path">engine-v2/book/book_side.go <span class="lc">156 lines &middot; built in 13 pieces</span></div>
 <div class="filewhy">Represents one side (bid/ask) of a book as a price-ordered treemap of FIFO deques, tracking total volume and quote amount. It exists to give O(log n) best-price access and O(1) order append/pop per price level. Without it the matching engine couldn't efficiently find and consume the best price.</div>
 <p class="buildnote">We grow this file the way a developer does &mdash; one declaration at a time. Type each piece in order; together they <em>are</em> the complete file.</p>
 <div class="piece"><div class="piece-h"><span class="pn">1</span> Start the file &mdash; <code>package</code> &amp; imports</div>
@@ -851,8 +851,9 @@ import (
 
 // BookSide represents one side (bid or ask) of the order book
 // internally maintained as an ordered map from price -&gt; deque of orders.
-// For ask, highest price has priority; for bid, lowest price.
-// The comparison function depends on the side.</code></pre>
+// For bid, the highest price has priority; for ask, the lowest.
+// The tree is always sorted ascending; the side difference is expressed at
+// read time by BestPrice (Max for bids, Min for asks), not by the comparator.</code></pre>
 <p class="imphdr">The imports we add now, and why each one:</p>
 <ul class="imp">
 <li><code>"errors"</code> &mdash; create and compare sentinel error values.</li>
@@ -866,7 +867,7 @@ import (
 <p class="pnote">Represents one side (bid or ask) of the book as a price-ordered <code>treemap</code> of price to order deque, plus cached total volume and quote amount for fast top-of-book queries.</p>
 <pre><code>type BookSide struct {
 	priceLevels      *treemap.Map // key: float64 price, value: *util.Deque (price ordered map)
-	isBid            bool         // true = bid side (min-first), false = ask side (max-first)
+	isBid            bool         // true = bid (best = highest price, uses Max); false = ask (best = lowest price, uses Min)
 	totalVolume      float64      // all volume sit in bookSide
 	totalQuoteAmount float64      // all size * price
 }</code></pre>
@@ -875,15 +876,11 @@ import (
 <p class="pnote">Constructs a <code>*BookSide</code> with an empty <code>treemap</code> and a flag marking bid vs ask, so best-price selection later picks max or min accordingly.</p>
 <pre><code>
 func NewBookSide(isBid bool) *BookSide {
-	// choose comparator: reverse for buys
-	var cmp utils.Comparator
-	if isBid {
-		cmp = utils.Float64Comparator // will treat smaller &lt; larger, but we'll always call Rightmost for buys
-	} else {
-		cmp = utils.Float64Comparator // same comparator
-	}
+	// One ascending comparator serves both sides: the "best" price is chosen at
+	// read time by BestPrice (Max for bids, Min for asks), so no per-side reversal
+	// is needed here.
 	return &amp;BookSide{
-		priceLevels:      treemap.NewWith(cmp),
+		priceLevels:      treemap.NewWith(utils.Float64Comparator),
 		isBid:            isBid,
 		totalVolume:      0,
 		totalQuoteAmount: 0,

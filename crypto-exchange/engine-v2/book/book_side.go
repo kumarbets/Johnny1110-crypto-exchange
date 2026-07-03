@@ -10,25 +10,22 @@ import (
 
 // BookSide represents one side (bid or ask) of the order book
 // internally maintained as an ordered map from price -> deque of orders.
-// For ask, highest price has priority; for bid, lowest price.
-// The comparison function depends on the side.
+// For bid, the highest price has priority; for ask, the lowest.
+// The tree is always sorted ascending; the side difference is expressed at
+// read time by BestPrice (Max for bids, Min for asks), not by the comparator.
 type BookSide struct {
 	priceLevels      *treemap.Map // key: float64 price, value: *util.Deque (price ordered map)
-	isBid            bool         // true = bid side (min-first), false = ask side (max-first)
+	isBid            bool         // true = bid (best = highest price, uses Max); false = ask (best = lowest price, uses Min)
 	totalVolume      float64      // all volume sit in bookSide
 	totalQuoteAmount float64      // all size * price
 }
 
 func NewBookSide(isBid bool) *BookSide {
-	// choose comparator: reverse for buys
-	var cmp utils.Comparator
-	if isBid {
-		cmp = utils.Float64Comparator // will treat smaller < larger, but we'll always call Rightmost for buys
-	} else {
-		cmp = utils.Float64Comparator // same comparator
-	}
+	// One ascending comparator serves both sides: the "best" price is chosen at
+	// read time by BestPrice (Max for bids, Min for asks), so no per-side reversal
+	// is needed here.
 	return &BookSide{
-		priceLevels:      treemap.NewWith(cmp),
+		priceLevels:      treemap.NewWith(utils.Float64Comparator),
 		isBid:            isBid,
 		totalVolume:      0,
 		totalQuoteAmount: 0,
