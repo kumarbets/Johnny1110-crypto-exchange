@@ -50,6 +50,7 @@ func (W *WSDataFeederJob) Start() error {
 		for {
 			select {
 			case <-ticker.C:
+				utils.SimTick() // advance sim duration every second (independent of subscribers)
 				keys := W.wsHub.GetSubscriptionKeys()
 				for _, key := range keys {
 					go W.collectAndSend(key)
@@ -67,10 +68,13 @@ func (W *WSDataFeederJob) collectAndSend(key ws.SubscriptionKey) {
 
 	switch key.Channel {
 	case ws.SYSSTATS:
-		// public: system-wide counters so the live badge works without login
+		// public: system-wide counters + sim state so the badge, duration and buttons
+		// all update over WebSocket (no REST polling)
 		W.wsHub.BroadcastToSubscribers(key, map[string]interface{}{
 			"system_orders_total": utils.GetOrdersPlaced(),
 			"system_trades_total": utils.GetTradesTotal(),
+			"sim_running":         utils.SimRunning(),
+			"sim_duration":        utils.SimDuration(),
 		})
 	case ws.MARKETS:
 		data, err := W.marketDataService.GetAllMarketData()

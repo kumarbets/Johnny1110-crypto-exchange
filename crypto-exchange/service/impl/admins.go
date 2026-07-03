@@ -62,6 +62,7 @@ func (as adminService) ResetExchange(ctx context.Context) error {
 	as.engine.Reset()        // empty the in-memory order books
 	utils.SetOrdersPlaced(0)  // reset system counters
 	utils.SetTradesTotal(0)
+	utils.SimReset()          // zero the sim duration
 	return nil
 }
 

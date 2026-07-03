@@ -349,7 +349,6 @@ export default {
       refreshInterval: null,
       simRunning: false,
       simDuration: 0,
-      durationTimer: null,
       orderType: 'limit',
       market: "",
       placeOrderBtn: "Buy",
@@ -399,9 +398,6 @@ export default {
     await this.fetchClosedOrders()
     await this.fetchBalances()
     this.startAutoRefresh()
-    this.simCheck()
-    // Duration is authoritative from the backend (accumulated running time); poll it each second.
-    this.durationTimer = setInterval(() => { this.simCheck() }, 1000)
     const baseAsset = 'ETH'; // Example dynamic data
     const quoteAsset = 'USD'; // Example dynamic data
     this.cmdOutputList.push(`C:\\CryptoEx> trading ${baseAsset}/${quoteAsset}
@@ -433,7 +429,6 @@ export default {
     if (this.obUnsub) { this.obUnsub(); this.obUnsub = null }
     if (this.userUnsub) { this.userUnsub(); this.userUnsub = null }
     if (this.sysUnsub) { this.sysUnsub(); this.sysUnsub = null }
-    if (this.durationTimer) { clearInterval(this.durationTimer); this.durationTimer = null }
   },
   methods: {
 
@@ -753,6 +748,9 @@ export default {
       this.sysUnsub = websocketService.subscribeSysStats((data) => {
         if (typeof data.system_orders_total === 'number') this.systemOrdersTotal = data.system_orders_total
         if (typeof data.system_trades_total === 'number') this.systemTradesTotal = data.system_trades_total
+        // sim running + duration now arrive over WebSocket (no REST /status polling)
+        if (typeof data.sim_duration === 'number') this.simDuration = data.sim_duration
+        if (typeof data.sim_running === 'boolean') this.simRunning = data.sim_running
         this.updateOrdersPerSec()
       })
       if (authUtils.isAuthenticated()) {
@@ -799,14 +797,6 @@ export default {
       if (!window.confirm('RESET will DELETE all orders & trades, re-fund users and clear the book. Continue?')) return
       try { await fetch(this.simUrl('reset'), { method: 'POST' }); this.simRunning = false; this.simDuration = 0 }
       catch (e) { console.error('sim reset failed', e) }
-    },
-    async simCheck() {
-      try {
-        const r = await fetch(this.simUrl('status'))
-        const j = await r.json()
-        this.simRunning = !!j.running
-        if (typeof j.duration === 'number') this.simDuration = j.duration // server truth (survives reload)
-      } catch (e) { /* control service unreachable */ }
     },
     changePlaceOrderBtn(btnName) {
       this.placeOrderBtn = btnName;
