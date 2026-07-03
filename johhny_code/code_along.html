@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Along — Build the crypto-exchange from an empty folder</title>
+<style>
+  :root{--bg:#fff;--fg:#1a1a1a;--muted:#555;--accent:#0b5fff;--border:#d0d0d0;--code-bg:#1e1e1e;--code-fg:#e8e8e8;--warn-bg:#fff7e0;--warn-bd:#e0b300;--note-bg:#eaf3ff;--note-bd:#0b5fff;--ok-bg:#e6f7ea;--ok-bd:#1f8b3a;--why-bg:#f6eefe;--why-bd:#7b2ff7;}
+  *{box-sizing:border-box;}html,body{margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.6;color:var(--fg);background:var(--bg);padding:24px 16px 96px;}
+  .wrap{max-width:1000px;margin:0 auto;}
+  h1,h2,h3,h4{line-height:1.25;margin-top:2em;}
+  h1{font-size:1.9rem;border-bottom:3px solid var(--accent);padding-bottom:8px;margin-top:0;}
+  h2{font-size:1.5rem;border-bottom:1px solid var(--border);padding-bottom:6px;margin-top:2.6em;}
+  h3{font-size:1.18rem;color:#222;}h4{font-size:1.02rem;color:#333;}
+  p,li{font-size:0.97rem;}
+  code{font-family:Menlo,Consolas,"Courier New",monospace;background:#ececec;padding:1px 5px;border-radius:3px;font-size:0.88em;overflow-wrap:anywhere;word-break:break-word;}
+  pre{background:var(--code-bg);color:var(--code-fg);padding:14px 16px;border-radius:6px;overflow-x:auto;font-size:0.85rem;line-height:1.45;}
+  pre code{background:transparent;color:inherit;padding:0;font-size:inherit;}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:0.9rem;display:block;overflow-x:auto;}
+  th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top;}th{background:#eee;}
+  .note,.warn,.ok,.why{border-left:4px solid var(--note-bd);background:var(--note-bg);padding:10px 14px;margin:14px 0;border-radius:4px;}
+  .warn{border-color:var(--warn-bd);background:var(--warn-bg);}.ok{border-color:var(--ok-bd);background:var(--ok-bg);}
+  .why{border-color:var(--why-bd);background:var(--why-bg);}
+  .why::before{content:"WHY WE DO THIS  ";font-weight:700;color:var(--why-bd);font-size:0.72rem;letter-spacing:1px;}
+  details{border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin:14px 0;background:#fff;}
+  details>summary{cursor:pointer;font-weight:600;}
+  .toc ol{padding-left:20px;}.toc li{margin:3px 0;}.toc>ol>li{margin:6px 0;}
+  .step{background:#fff;border:1px solid var(--border);border-left:5px solid var(--accent);border-radius:8px;padding:16px 18px;margin:26px 0;}
+  .step-tag{display:inline-block;background:var(--accent);color:#fff;padding:2px 10px;border-radius:12px;font-size:0.78rem;font-weight:700;margin-bottom:6px;}
+  .file-path{color:#7b2ff7;font-family:Menlo,Consolas,monospace;font-size:0.85rem;display:block;margin:8px 0 2px;font-weight:600;}
+  .chk{background:var(--ok-bg);border:1px solid var(--ok-bd);border-radius:6px;padding:8px 12px;margin:12px 0;font-size:0.9rem;}
+  .chk::before{content:"✓ CHECKPOINT  ";font-weight:700;color:var(--ok-bd);font-size:0.72rem;letter-spacing:1px;}
+  .top-btn{position:fixed;right:16px;bottom:16px;background:var(--accent);color:#fff;padding:10px 14px;border-radius:24px;text-decoration:none;font-size:0.85rem;box-shadow:0 2px 8px rgba(0,0,0,.2);}
+  .diagram{background:#fafafa;border:1px solid var(--border);border-radius:8px;padding:14px;overflow-x:auto;}.diagram pre{background:transparent;color:#222;font-size:0.8rem;padding:0;}
+  @media(max-width:768px){body{padding:14px 9px 84px;}.wrap{max-width:100%;}h1{font-size:1.4rem;}h2{font-size:1.18rem;}pre{font-size:0.76rem;}.step{padding:13px;}.top-btn{padding:8px 12px;font-size:0.8rem;}}
+</style>
+</head>
+<body>
+<a href="#top" class="top-btn">&uarr; Top</a>
+<div class="wrap" id="top">
+
+<h1>Code Along &mdash; build the crypto-exchange from an empty folder</h1>
+<p>This is a <strong>runbook</strong>. Open an empty folder, open this page, and do <em>exactly</em> what each step says, in order. When you reach the end you will have typed &mdash; and understood &mdash; the entire backend of a working spot cryptocurrency exchange in Go: an in-memory matching engine, a REST API, a WebSocket feed, a settled money layer on SQLite, candlesticks, and a market-maker bot.</p>
+
+<div class="ok">
+<strong>How to use this page.</strong> Every step has four parts: a <span style="color:var(--why-bd);font-weight:700">WHY WE DO THIS</span> box (the reason a developer reaches for this piece &mdash; the concept and the benefit), the <span style="color:#7b2ff7;font-weight:700">file path</span> to create, the <strong>code to type</strong>, and a walkthrough of what each line does. Type the code yourself (don't paste) &mdash; muscle memory is half of learning. Where a real file is long, we type the parts that teach and mark the rest as "same pattern, keep going."
+</div>
+<div class="note">
+<strong>You do not need to know Go yet.</strong> Concepts are explained the first time they appear. If a word is new (goroutine, interface, pointer, mutex) it gets a one-paragraph plain-English intro right where you meet it. The <em>only</em> prerequisite is installing Go (Chapter&nbsp;0).
+</div>
+<div class="why">
+We build <strong>bottom-up</strong> &mdash; the pieces with no dependencies first (config, the order type), then the matching engine, then the database, then the services on top, and finally <code>main.go</code> that wires it all together. Why this order? Because in Go a package can only use packages that already exist and compile. If you build the engine before the thing it needs, it won't compile and you'll be stuck. Bottom-up means <em>every step compiles the moment you finish typing it.</em> That is the single most important habit for not getting lost in a big codebase.
+</div>
+
+<details class="toc" open>
+<summary>Table of contents (the whole build, in order)</summary>
+<ol>
+  <li><a href="#c0">Chapter 0 &mdash; Setup: Go, the module, the folder skeleton</a></li>
+  <li><a href="#c1">Chapter 1 &mdash; Leaf packages: <code>utils</code> &amp; <code>settings</code></a></li>
+  <li><a href="#c2">Chapter 2 &mdash; The domain model: the <code>Order</code> (engine-v2/model)</a></li>
+  <li><a href="#c3">Chapter 3 &mdash; The market descriptor (engine-v2/market)</a></li>
+  <li><a href="#c4">Chapter 4 &mdash; The order-book data structures (deque, tree, index)</a></li>
+  <li><a href="#c5">Chapter 5 &mdash; The order book &amp; the matching algorithm</a></li>
+  <li><a href="#c6">Chapter 6 &mdash; The matching-engine facade (core)</a></li>
+  <li><a href="#c7">Chapter 7 &mdash; DTOs: the shapes that cross layers</a></li>
+  <li><a href="#c8">Chapter 8 &mdash; The database &amp; schema (db.go, SQLite)</a></li>
+  <li><a href="#c9">Chapter 9 &mdash; Repositories: SQL behind interfaces</a></li>
+  <li><a href="#c10">Chapter 10 &mdash; The transaction helper (WithTx)</a></li>
+  <li><a href="#c11">Chapter 11 &mdash; Services: users, balances, and the two-phase order</a></li>
+  <li><a href="#c12">Chapter 12 &mdash; Security: the token store</a></li>
+  <li><a href="#c13">Chapter 13 &mdash; Middleware: auth, CORS, errors</a></li>
+  <li><a href="#c14">Chapter 14 &mdash; Controllers: the HTTP handlers</a></li>
+  <li><a href="#c15">Chapter 15 &mdash; The router: wiring URLs to handlers</a></li>
+  <li><a href="#c16">Chapter 16 &mdash; OHLCV: turning trades into candlesticks</a></li>
+  <li><a href="#c17">Chapter 17 &mdash; WebSocket: the live push layer</a></li>
+  <li><a href="#c18">Chapter 18 &mdash; Schedulers: the background heartbeats</a></li>
+  <li><a href="#c19">Chapter 19 &mdash; The AMM: keeping the book liquid</a></li>
+  <li><a href="#c20">Chapter 20 &mdash; The container: wiring everything once</a></li>
+  <li><a href="#c21">Chapter 21 &mdash; main.go &amp; startup: press play</a></li>
+  <li><a href="#c22">Chapter 22 &mdash; Run it, trade on it, benchmark it</a></li>
+</ol>
+</details>
+
+<!-- ==================== CHAPTER 0 ==================== -->
+<h2 id="c0">Chapter 0 &mdash; Setup</h2>
+<div class="why">
+Before any code, a Go project needs two things: the Go toolchain (the compiler + tools) and a <strong>module</strong> (a named, versioned bundle that tells Go where your code lives and how to fetch libraries). Without a module, <code>import</code> has no idea what your own packages are called. We create it first so every file we write afterward can find every other file.
+</div>
+<div class="step">
+<span class="step-tag">STEP 0.1</span> Install Go &amp; verify.
+<p>Download from <code>go.dev/dl</code> (this project needs <strong>Go 1.23+</strong>). Then, in a terminal:</p>
+<pre><code>$ go version
+go version go1.23.x ...</code></pre>
+</div>
+<div class="step">
+<span class="step-tag">STEP 0.2</span> Create the project &amp; the module.
+<pre><code>$ mkdir crypto-exchange &amp;&amp; cd crypto-exchange
+$ go mod init github.com/johnny1110/crypto-exchange</code></pre>
+<p>That last command writes a <code>go.mod</code> file whose first line is the module name. <strong>That name is the prefix for every internal import.</strong> So the file <code>engine-v2/model/order.go</code> will be imported elsewhere as <code>github.com/johnny1110/crypto-exchange/engine-v2/model</code>. Pick this name once; changing it later means editing every import.</p>
+</div>
+<div class="step">
+<span class="step-tag">STEP 0.3</span> Lay out the folders. In Go, <strong>one folder = one package</strong>, and the folder structure <em>is</em> the architecture.
+<pre><code>$ mkdir -p engine-v2/model engine-v2/book engine-v2/core engine-v2/market engine-v2/util
+$ mkdir -p dto repository/impl service/impl/amm service/serviceHelper
+$ mkdir -p controller middleware security ohlcv scheduler ws container settings utils external
+$ mkdir -p doc/db_schema</code></pre>
+<div class="why">
+Why so many folders instead of one big one? Three reasons a developer cares about: (1) <strong>the compiler enforces layering</strong> &mdash; a folder can only depend "inward" (the engine can't accidentally import the web layer), so bad coupling literally won't build; (2) <strong>change is localised</strong> &mdash; new storage touches only <code>repository/impl</code>, a new endpoint only <code>controller</code>; (3) <strong>you can test a piece in isolation</strong> &mdash; the engine folder compiles and benchmarks with no database or server, which is how it reaches a million matches/second. Keep this mental picture: <em>outer folders (web) depend on inner folders (engine); never the reverse.</em>
+</div>
+</div>
+<div class="chk">Running <code>go build ./...</code> now succeeds and prints nothing (there's no code yet, but the module is valid). If it errors, your <code>go.mod</code> is missing &mdash; re-run step 0.2.</div>
+
+<!-- ==================== CHAPTER 1 ==================== -->
+<h2 id="c1">Chapter 1 &mdash; Leaf packages: <code>utils</code> &amp; <code>settings</code></h2>
+<div class="why">
+We start at the very bottom of the dependency graph: <strong>leaf packages</strong> &mdash; packages that import (almost) nothing. Everyone can safely import a leaf without creating an import <em>cycle</em> (A imports B imports A, which Go forbids). Two things everything else needs: a tiny math helper + shared counters (<code>utils</code>), and the list of what the exchange trades (<code>settings</code>). Building leaves first means the engine and services can use them immediately.
+</div>
+<div class="step">
+<span class="step-tag">STEP 1.1</span> A math epsilon and system counters.
+<span class="file-path">utils/counter.go</span>
+<pre><code>package utils
+
+import "sync/atomic"
+
+// Scale is a tiny tolerance for floating-point "dust". Prices/sizes are float64,
+// and float math leaves specks (0.30000000000000004). Anything &le; Scale counts as zero.
+const Scale = 0.00000001
+
+// Process-wide counters of orders and trades across ALL users. atomic.AddInt64 is a
+// lock-free, thread-safe increment (many goroutines can bump it at once safely).
+var ordersPlacedTotal int64
+var tradesTotal int64
+
+func IncOrdersPlaced()       { atomic.AddInt64(&amp;ordersPlacedTotal, 1) }
+func AddTrades(n int64)      { atomic.AddInt64(&amp;tradesTotal, n) }
+func GetOrdersPlaced() int64 { return atomic.LoadInt64(&amp;ordersPlacedTotal) }
+func GetTradesTotal() int64  { return atomic.LoadInt64(&amp;tradesTotal) }</code></pre>
+<p><strong>Line by line:</strong> <code>package utils</code> names the package (matches the folder). <code>const Scale</code> is a compile-time constant. The <code>var ... int64</code> are package-level variables shared by the whole program. <code>atomic.AddInt64(&amp;x, 1)</code> increments <code>x</code> safely from many goroutines &mdash; the <code>&amp;</code> passes the variable's <em>address</em> so the function can change the real thing (Go pointers; more in Chapter 2).</p>
+<div class="why">
+Why a whole package for this? Because both the <em>order service</em> (which increments the counters) and the <em>WebSocket feeder</em> (which reads them for the live "orders/sec" badge) need them, and those two live in different branches of the tree. Put shared state in a leaf and both can import it with zero risk of a cycle. Why <code>atomic</code> and not a plain <code>x++</code>? Because <code>x++</code> from two goroutines at once can lose an increment (the race from the concepts guide); <code>atomic</code> makes it safe without the cost of a lock.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 1.2</span> The static exchange config &mdash; but it depends on the <code>market</code> type we build in Chapter 3, so we'll write it there. For now, create the assets helper which needs nothing:
+<span class="file-path">settings/settings.go</span>
+<pre><code>package settings
+
+// GetAllAssets returns every token the exchange knows about.
+func GetAllAssets() []string {
+    return []string{"USDT", "BTC", "ETH", "DOT", "ASTR", "HDX", "BTSE",
+        "SOL", "LINK", "ADA", "BNB", "AVAX", "DOGE"}
+}
+
+// Special accounts. "0" is the house/margin account; the long id is the market-maker bot.
+const MARGIN_ACCOUNT_ID = "0"
+const INTERNAL_AMM_ACCOUNT_ID = "MID250606CXAZ1199"</code></pre>
+<div class="why">
+Why put the market list and asset list in <code>settings</code> instead of scattering them? Because "what do we trade" is a <em>policy decision</em> that many packages ask about (the engine to build books, the AMM to quote, the OHLCV to track symbols). One source of truth means adding a market is a one-line edit in one file, not a hunt-and-peck across the codebase. This is the <strong>single-source-of-truth</strong> principle, and it's why almost every project has a <code>config</code>/<code>settings</code> package.
+</div>
+</div>
+<div class="chk"><code>go build ./utils ./settings</code> compiles. You've written your first two packages and already met constants, package variables, slices (<code>[]string</code>), atomics, and pointers-by-address.</div>
+
+<!-- ==================== CHAPTER 2 ==================== -->
+<h2 id="c2">Chapter 2 &mdash; The domain model: the <code>Order</code></h2>
+<div class="why">
+Everything an exchange does revolves around one noun: the <strong>order</strong>. So the very first "real" thing we build is the <code>Order</code> type and the little words that describe it (buy/sell, limit/market, maker/taker). We put it in <code>engine-v2/model</code> &mdash; a package with <em>zero</em> dependencies on the rest of the app (no database, no web) &mdash; because the matching engine must be pure and fast, and pure code is easy to test and impossible to accidentally couple to a database.
+</div>
+<div class="step">
+<span class="step-tag">STEP 2.1</span> The enums: side, mode, type, status.
+<span class="file-path">engine-v2/model/order.go</span>
+<pre><code>package model
+
+import (
+    "github.com/johnny1110/crypto-exchange/utils"
+    "time"
+)</code></pre>
+<p><strong>The imports, and why each is here (this is the habit to build):</strong></p>
+<ul>
+  <li><code>"time"</code> &mdash; a Go standard-library package for dates and durations. We need it because every order carries a <code>Timestamp</code> (<code>time.Time</code>) so the book can honour <em>time priority</em> (first-in-first-out at a price). We'll call <code>time.Now()</code> when an order is created.</li>
+  <li><code>".../utils"</code> &mdash; <em>our own</em> leaf package from Chapter 1. We import it for the <code>utils.Scale</code> epsilon, used to decide when an order's remaining size is "basically zero" (fully filled). Notice we can import it because it's a leaf &mdash; no risk of a cycle.</li>
+</ul>
+<p>Now the enums. Go has no <code>enum</code> keyword; the idiom is a named integer type plus <code>iota</code> (an auto-incrementing counter that resets each <code>const</code> block):</p>
+<pre><code>type Side int
+type Mode int
+type OrderType int
+type OrderStatus string
+
+const ( LIMIT OrderType = iota; MARKET )   // LIMIT=0, MARKET=1
+const ( BID  Side = iota; ASK )            // BID=0 (buy), ASK=1 (sell)
+const ( MAKER Mode = iota; TAKER )         // MAKER=0, TAKER=1
+
+const (
+    ORDER_STATUS_NEW      OrderStatus = "NEW"
+    ORDER_STATUS_PARTIAL  OrderStatus = "PARTIAL"
+    ORDER_STATUS_FILLED   OrderStatus = "FILLED"
+    ORDER_STATUS_CANCELED OrderStatus = "CANCELED"
+)</code></pre>
+<div class="why">
+Why make <code>Side</code> its own type instead of using a plain <code>int</code>? Because then the compiler stops you from passing a price where a side is expected &mdash; a whole class of bugs vanishes at compile time. Why <code>iota</code>? It's the least-typing way to get a set of related constants; the compiler assigns 0,1,2&hellip; automatically. Why is <code>OrderStatus</code> a <code>string</code> and not an int? Because it's written to the database and shown in the API, and a human-readable <code>"FILLED"</code> beats a mysterious <code>2</code>.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 2.2</span> The <code>Order</code> struct &mdash; the data every order carries.
+<pre><code>type Order struct {
+    ID            string
+    UserID        string
+    Side          Side
+    Price         float64
+    OriginalSize  float64   // how big the order was when placed
+    RemainingSize float64   // how much is still unfilled
+    QuoteAmount   float64   // only used by MARKET buy orders (a cash budget)
+    Mode          Mode
+    FeeRate       float64
+    Timestamp     time.Time
+}</code></pre>
+<p>A <code>struct</code> is just a bundle of named fields &mdash; the "record" of the language. Notice there is no <code>Status</code> field: status is <em>computed</em> from the two size numbers, so it can never disagree with reality:</p>
+<pre><code>func (o *Order) GetStatus() OrderStatus {
+    if o.OriginalSize == o.RemainingSize { return ORDER_STATUS_NEW }
+    if o.RemainingSize &lt;= utils.Scale    { return ORDER_STATUS_FILLED }   // &lt;-- why we imported utils
+    if o.RemainingSize &gt; 0 &amp;&amp; o.RemainingSize &lt; o.OriginalSize { return ORDER_STATUS_PARTIAL }
+    return ORDER_STATUS_CANCELED
+}
+
+func (o *Order) CounterSide() Side { return o.Side ^ 1 }   // BID&harr;ASK by flipping the bit</code></pre>
+<p><code>func (o *Order) GetStatus()</code> &mdash; the <code>(o *Order)</code> is the <em>receiver</em>: this is a method you call as <code>myOrder.GetStatus()</code>. The <code>*</code> means it receives a <strong>pointer</strong> to the order (its memory address), not a copy &mdash; so it reads the real object and, in other methods, can change it.</p>
+</div>
+<div class="step">
+<span class="step-tag">STEP 2.3</span> Constructors and the linked-list node.
+<pre><code>func NewOrder(orderId, userId string, side Side, price, size, quoteAmt float64,
+              mode Mode, feeRate float64) *Order {
+    return &amp;Order{
+        ID: orderId, UserID: userId, Side: side, Price: price,
+        OriginalSize: size, RemainingSize: size, QuoteAmount: quoteAmt,
+        FeeRate: feeRate, Mode: mode, Timestamp: time.Now(),   // &lt;-- why we imported time
+    }
+}
+
+// A node in the doubly-linked queue at one price level (built in Chapter 4).
+type OrderNode struct {
+    Order      *Order
+    Prev, Next *OrderNode
+}
+func (n *OrderNode) Size()  float64 { return n.Order.RemainingSize }
+func (n *OrderNode) Price() float64 { return n.Order.Price }</code></pre>
+<p><code>return &amp;Order{...}</code> &mdash; the <code>&amp;</code> creates the struct <em>and</em> returns a pointer to it. Returning <code>*Order</code> (a pointer) is deliberate: matching <em>mutates</em> <code>RemainingSize</code> in place, and the linked list stores pointers to these same objects, so everyone sees the same order change.</p>
+</div>
+<div class="chk"><code>go build ./engine-v2/model</code> compiles. You now have the atom of the whole system, and you've learned structs, methods, receivers, pointers, <code>iota</code> enums, and the "compute, don't store" trick.</div>
+
+<!-- ==================== CHAPTER 3 ==================== -->
+<h2 id="c3">Chapter 3 &mdash; The market descriptor</h2>
+<div class="why">
+An order alone isn't enough; it trades <em>within a market</em> (BTC-USDT). A market is just "these two assets, this name." We give it its own tiny package because both the engine (to route/validate) and <code>settings</code> (to list them) need the type, and a shared, dependency-free type package keeps everyone happy.
+</div>
+<div class="step">
+<span class="step-tag">STEP 3.1</span>
+<span class="file-path">engine-v2/market/market.go</span>
+<pre><code>package market
+
+// no imports needed: this file uses only built-in types (string), so the import
+// block is empty. A developer leaves it out entirely rather than writing import ().
+
+type MarketInfo struct {
+    Name       string   // "BTC-USDT"
+    BaseAsset  string   // "BTC"  — what you buy/sell
+    QuoteAsset string   // "USDT" — what you pay with
+}</code></pre>
+<p><strong>On imports:</strong> there are none, and that's worth noticing &mdash; when a file needs nothing from outside, you write no import block at all. A leaf type like this is deliberately import-free so <em>anyone</em> can use it.</p>
+</div>
+<div class="step">
+<span class="step-tag">STEP 3.2</span> Now finish <code>settings</code> with the market list (it needed this type).
+<span class="file-path">settings/settings.go</span> (add to the file from Chapter 1)
+<pre><code>import "github.com/johnny1110/crypto-exchange/engine-v2/market"</code></pre>
+<p><strong>Why this import:</strong> the market list is a slice of <code>*market.MarketInfo</code>, so <code>settings</code> must import the <code>market</code> package to name that type. This is the first time one of our packages depends on another of ours &mdash; and it points <em>inward</em> (settings &rarr; market), exactly as the layering rule demands.</p>
+<pre><code>var ALL_MARKETS = []*market.MarketInfo{
+    {Name: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT"},
+    {Name: "ETH-USDT", BaseAsset: "ETH", QuoteAsset: "USDT"},
+    // ... 12 markets total, all quoted in USDT
+}
+
+// per-market cap on how much quote value the market-maker posts per price level
+var MAX_QUOTE_AMT_PER_LEVEL_MAP = map[string]float64{
+    "BTC-USDT": 20000, "ETH-USDT": 4000, "SOL-USDT": 3888, /* ... */ }</code></pre>
+<p><code>[]*market.MarketInfo</code> reads "a slice of pointers to MarketInfo." <code>map[string]float64</code> is a hash map from market name to a number &mdash; Go's built-in dictionary.</p>
+</div>
+<div class="chk"><code>go build ./engine-v2/market ./settings</code> compiles. The engine now has the two nouns it needs: an order, and a market for it to live in.</div>
+
+<!-- ==================== CHAPTER 4 ==================== -->
+<h2 id="c4">Chapter 4 &mdash; The order-book data structures</h2>
+<div class="why">
+Before we can match orders we need somewhere to keep them that answers three questions <em>fast</em>: "what's the best price?", "who's next in line at this price?", and "where is order&nbsp;X so I can cancel it?". A developer doesn't reach for a random data structure &mdash; each of the three is chosen to make one operation cheap (measured in Big-O: O(1)=constant is great, O(log n) grows slowly, O(n) grows with the whole book and is to be avoided on the hot path). We build three small pieces here, then assemble them into the book in Chapter 5.
+</div>
+<div class="step">
+<span class="step-tag">STEP 4.1</span> A FIFO queue per price level (a doubly-linked list / deque).
+<span class="file-path">engine-v2/util/deque.go</span>
+<pre><code>package util
+
+import "github.com/johnny1110/crypto-exchange/engine-v2/model"</code></pre>
+<p><strong>Why this import:</strong> the queue stores <code>*model.OrderNode</code> values (the linked-list node we defined in Chapter 2), so we import our <code>model</code> package to name that type. That's the only thing this file needs from outside.</p>
+<pre><code>type OrderNodeDeque struct {
+    head, tail *model.OrderNode   // both ends, so push/pop at either end is O(1)
+    size       int
+    volume     float64            // running sum of remaining sizes at this price
+}
+// PushBack adds to the tail (newest, back of the line). PopFront removes the head
+// (oldest, front of the line). Both are O(1): just re-point a couple of pointers.
+// volume is kept in sync on every push/pop so a whole level's size is instant.</code></pre>
+<div class="why">
+Why a doubly-linked list instead of a simple array/slice? Because the hottest operation in the whole exchange is "remove the order at the front of this price level" (a fill). Removing the front of an array means shifting every other element &mdash; O(n). Removing the head of a linked list is O(1) &mdash; re-point one pointer. At a price level with thousands of resting orders, that's the difference between instant and a stall. And because we keep <em>both</em> head and tail, adding a new order to the back (time priority: newest goes last) is also O(1).
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 4.2</span> One side of the book: a sorted map of price &rarr; queue.
+<span class="file-path">engine-v2/book/book_side.go</span>
+<pre><code>package book
+
+import (
+    "github.com/emirpasic/gods/maps/treemap"
+    "github.com/emirpasic/gods/utils"
+    "github.com/johnny1110/crypto-exchange/engine-v2/model"
+)</code></pre>
+<p><strong>The imports, one by one:</strong></p>
+<ul>
+  <li><code>github.com/emirpasic/gods/maps/treemap</code> &mdash; a third-party library ("gods" = Go Data Structures) giving a <strong>balanced tree map</strong>: a dictionary whose keys stay <em>sorted</em>. We need sorted prices so "best price" is one step away. (Run <code>go get github.com/emirpasic/gods</code> to download it; Go records the exact version in <code>go.sum</code>.)</li>
+  <li><code>github.com/emirpasic/gods/utils</code> &mdash; from the same library, it provides comparator functions like <code>utils.Float64Comparator</code> that tell the tree how to sort float64 keys.</li>
+  <li><code>.../engine-v2/model</code> &mdash; our order/node types again.</li>
+</ul>
+<pre><code>type BookSide struct {
+    priceLevels      *treemap.Map   // key = price, value = *OrderNodeDeque
+    isBid            bool           // bid: best = highest price; ask: best = lowest
+    totalVolume      float64        // sum of all resting sizes (for market-order feasibility)
+    totalQuoteAmount float64        // sum of size*price
+}
+// BestPrice(): for a bid, the tree's MAX key; for an ask, its MIN key — O(log n) or better.
+// AddOrderNode(price, node): find-or-create the deque at that price, push the node.
+// RemoveOrderNode(price, node): unlink it; drop the price level if its deque is now empty.</code></pre>
+<div class="why">
+Why a tree map and not a plain map or a sorted array? A plain hash map (Go's built-in <code>map</code>) has O(1) lookup but is <em>unsorted</em> &mdash; finding the best price would mean scanning every key (O(n)). A sorted array keeps order but inserting a new price means shifting elements (O(n)). A balanced tree gives the best of both: O(log&nbsp;n) insert/delete <em>and</em> the min/max (best price) is right there. Prices come and go constantly, so we need cheap insert <em>and</em> cheap "best" &mdash; only the tree gives both.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 4.3</span> An index for O(1) cancel.
+<span class="file-path">engine-v2/book/order_index.go</span>
+<pre><code>package book
+
+// no external imports — this file uses only the built-in map type and a small struct.
+
+type indexEntry struct {
+    side  model.Side
+    price float64
+    node  *model.OrderNode
+}
+type OrderIndex struct {
+    index map[string]indexEntry   // orderID -> where that order physically sits
+}</code></pre>
+<div class="why">
+Why keep a second structure just for cancels? Because a user cancels by <em>order ID</em>, but the book is organised by <em>price</em>. Without this index, cancelling would mean searching every price level for the ID &mdash; O(n) over the whole book (100k+ orders in a busy market). With a hash map from ID straight to the node, cancel is O(1): jump right to it, unlink it. This is a classic space-for-time trade: a little extra memory to make a frequent operation instant.
+</div>
+</div>
+<div class="chk"><code>go get github.com/emirpasic/gods</code> then <code>go build ./engine-v2/...</code> compiles. You've now got the three fast structures; next we make them match orders.</div>
+
+<!-- ==================== CHAPTER 5 ==================== -->
+<h2 id="c5">Chapter 5 &mdash; The order book &amp; the matching algorithm</h2>
+<div class="why">
+This is the heart of the exchange &mdash; the code that pairs buyers with sellers. Everything so far was setup for this. We assemble the three structures into an <code>OrderBook</code>, then write the matching loop that honours the two fairness rules (best price first; at the same price, oldest first). This is the code the README benchmarks at ~1&ndash;2.7 million orders/second, precisely because Chapter&nbsp;4 made every step O(1) or O(log&nbsp;n).
+</div>
+<div class="step">
+<span class="step-tag">STEP 5.1</span> The book struct + its lock.
+<span class="file-path">engine-v2/book/orderbook.go</span>
+<pre><code>package book
+
+import (
+    "errors"
+    "fmt"
+    "github.com/johnny1110/crypto-exchange/engine-v2/market"
+    "github.com/johnny1110/crypto-exchange/engine-v2/model"
+    "github.com/johnny1110/crypto-exchange/utils"
+    "github.com/labstack/gommon/log"
+    "sync"
+)</code></pre>
+<p><strong>Every import, and why it's here:</strong></p>
+<ul>
+  <li><code>"errors"</code> &amp; <code>"fmt"</code> &mdash; standard library. <code>errors.New("...")</code> makes simple error values; <code>fmt.Errorf("... %w", err)</code> makes formatted errors that wrap another. A matching engine returns errors for bad input, so we need both.</li>
+  <li><code>.../engine-v2/market</code> &mdash; the book belongs to a market, so it holds a <code>*market.MarketInfo</code>.</li>
+  <li><code>.../engine-v2/model</code> &mdash; orders, nodes, sides.</li>
+  <li><code>.../utils</code> &mdash; the <code>Scale</code> epsilon, to decide when a fill is complete.</li>
+  <li><code>github.com/labstack/gommon/log</code> &mdash; a small logging library (the project's chosen logger). We log debug/critical events during matching. (<code>go get github.com/labstack/gommon</code>.)</li>
+  <li><code>"sync"</code> &mdash; standard library concurrency tools. We need <code>sync.Mutex</code> to lock the book so two orders can't interleave and corrupt it (the race condition). This one import is what makes the engine thread-safe.</li>
+</ul>
+<pre><code>type OrderBook struct {
+    market      *market.MarketInfo
+    bidSide     *BookSide
+    askSide     *BookSide
+    orderIndex  *OrderIndex
+    latestPrice float64
+    snapshot    *BookSnapshot   // cached top-20, refreshed by a scheduler (Chapter 18)
+    obMu        sync.Mutex      // ONE lock guarding a whole placement
+}</code></pre>
+</div>
+<div class="step">
+<span class="step-tag">STEP 5.2</span> Placement: lock, reject duplicates, route by type.
+<pre><code>func (ob *OrderBook) PlaceOrder(orderType model.OrderType, order *model.Order) ([]Trade, error) {
+    if order == nil { return nil, errors.New("order cannot be nil") }
+    ob.obMu.Lock()               // take the lock...
+    defer ob.obMu.Unlock()       // ...and guarantee we release it however we return
+
+    if ob.orderIndex.OrderIdExist(order.ID) {
+        return nil, fmt.Errorf("%w: %s", ErrOrderExists, order.ID)
+    }
+    switch orderType {
+    case model.LIMIT:  return ob.placeLimitOrder(order)
+    case model.MARKET: return ob.placeMarketOrder(order)
+    default:           return nil, fmt.Errorf("%w: %v", ErrUnsupportedOrderType, orderType)
+    }
+}</code></pre>
+<div class="why">
+Why <code>Lock()</code> immediately, and why <code>defer Unlock()</code>? Thousands of orders arrive at once on different goroutines. If two touch the same book at the same time, one can read a half-updated state &mdash; corruption, lost money. The mutex makes placement <em>serial</em>: one order fully completes before the next starts. <code>defer Unlock()</code> schedules the release for whenever the function returns (success, error, or panic), so you can <em>never</em> forget to unlock and deadlock the exchange. Correctness of money beats cleverness; the single lock is the right call.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 5.3</span> The maker path (rest) and the taker path (match, then rest).
+<pre><code>func (ob *OrderBook) placeLimitOrder(order *model.Order) ([]Trade, error) {
+    if order.Mode == model.MAKER {
+        return nil, ob.makeLimitOrder(order)      // maker: just rest, no matching
+    }
+    trades, err := ob.takeLimitOrder(order)       // taker: match first, rest the remainder
+    if err != nil { return nil, err }
+    ob.updateLatestPrice(trades)
+    return trades, nil
+}
+
+// MAKER: wrap in a node, drop at the back of the queue for this price, index it. Done.
+func (ob *OrderBook) makeLimitOrder(order *model.Order) error {
+    node := &amp;model.OrderNode{Order: order}
+    side := ob.getSide(order.Side)
+    side.AddOrderNode(order.Price, node)
+    ob.addOrderIndex(node)
+    return nil
+}</code></pre>
+</div>
+<div class="step">
+<span class="step-tag">STEP 5.4</span> The matching loop &mdash; the single most important function.
+<pre><code>func (ob *OrderBook) takeLimitOrder(order *model.Order) ([]Trade, error) {
+    var trades []Trade
+    opposite := ob.getOppositeSide(order.Side)          // a buy matches the ASK side
+
+    for order.RemainingSize &gt; 0 {                        // keep going until filled...
+        bestPrice, err := opposite.BestPrice()
+        if err != nil || !ob.canMatch(order.Side, order.Price, bestPrice) {
+            break                                        // ...or nothing crosses anymore
+        }
+        trade, shouldContinue, err := ob.executeMatch(order, opposite, bestPrice)
+        if err != nil { return trades, err }
+        trades = append(trades, trade)
+        if !shouldContinue { break }
+    }
+    if order.RemainingSize &gt; 0 {                         // leftover becomes a resting maker
+        if err := ob.makeLimitOrder(order); err != nil { return trades, err }
+    }
+    return trades, nil
+}
+
+// canMatch is the price-cross rule: a buyer trades only at asks &le; its price;
+// a seller only at bids &ge; its price.
+func (ob *OrderBook) canMatch(side model.Side, orderPrice, bestPrice float64) bool {
+    if side == model.BID { return orderPrice &gt;= bestPrice }
+    return orderPrice &lt;= bestPrice
+}</code></pre>
+<div class="why">
+This <code>for</code> loop <em>is</em> the exchange. Read it as English: "while I still have quantity, look at the best opposite price; if it crosses mine, trade against it; stop when nothing crosses; whatever's left, rest in the book." <code>executeMatch</code> pops the front of the best level (oldest first &mdash; time priority), trades the smaller of the two quantities, reduces both, and emits a <code>Trade</code>. Everything else in this whole project is plumbing that feeds orders into this loop and carries its results back out. Type it slowly.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 5.5</span> Market orders sweep without a price limit. <em>(Type the two functions from Part&nbsp;G.7 of the reference guide &mdash; <code>takeMarketBidOrder</code> spends a quote budget; <code>takeMarketAskOrder</code> delivers a size.)</em> They follow the same shape as the loop above but with no <code>canMatch</code> guard &mdash; they eat the best rungs until the budget/size runs out, checking first that the book holds enough.</p>
+<p>Finally add the <strong>snapshot</strong> type and <code>RefreshSnapshot</code> (copies the top-20 of each side into an immutable struct) &mdash; readers will serve that copy so they never fight this lock. And the trade type:</p>
+<pre><code>type Trade struct {
+    Market                 string
+    BidOrderID, AskOrderID string
+    BidUserID,  AskUserID  string
+    BidFeeRate, AskFeeRate float64
+    Price, Size            float64
+    Timestamp              time.Time
+}</code></pre>
+</div>
+<div class="chk"><code>go build ./engine-v2/book</code> compiles. You have a working matching engine &mdash; the crown jewel &mdash; and you understand its lock, its loop, and why it's fast.</div>
+
+<!-- ==================== CHAPTER 6 ==================== -->
+<h2 id="c6">Chapter 6 &mdash; The matching-engine facade</h2>
+<div class="why">
+We have <em>one</em> book per market, but the app trades 12 markets. Rather than make the rest of the code juggle 12 books and their locks, we wrap them behind a single friendly door &mdash; a <strong>facade</strong>. The service layer will only ever say "engine, place this order in BTC-USDT"; the facade finds the right book. One simple surface, complexity hidden behind it.
+</div>
+<div class="step">
+<span class="step-tag">STEP 6.1</span>
+<span class="file-path">engine-v2/core/engine.go</span>
+<pre><code>package core
+
+import (
+    "errors"
+    "fmt"
+    "github.com/johnny1110/crypto-exchange/engine-v2/book"
+    "github.com/johnny1110/crypto-exchange/engine-v2/market"
+    "github.com/johnny1110/crypto-exchange/engine-v2/model"
+    "github.com/labstack/gommon/log"
+    "sync"
+)</code></pre>
+<p><strong>Imports:</strong> <code>errors</code>/<code>fmt</code> for errors; <code>book</code> because the engine holds many <code>*book.OrderBook</code>; <code>market</code> for the market list it's built from; <code>model</code> for order types in method signatures; <code>log</code> for debug lines; <code>sync</code> for an <code>RWMutex</code> guarding the map of books (many readers &mdash; "which book?" &mdash; and rare writers, so a read/write lock beats a plain mutex).</p>
+<pre><code>type MatchingEngine struct {
+    mu         sync.RWMutex
+    orderbooks map[string]*book.OrderBook   // market name -> its book
+    markets    []*market.MarketInfo         // kept so we can Reset() to empty books
+}
+
+func NewMatchingEngine(markets []*market.MarketInfo) (*MatchingEngine, error) {
+    if len(markets) == 0 { return nil, errors.New("market must have at least one market") }
+    e := &amp;MatchingEngine{orderbooks: make(map[string]*book.OrderBook, len(markets)), markets: markets}
+    for _, m := range markets { e.orderbooks[m.Name] = book.NewOrderBook(m) }
+    return e, nil
+}
+
+func (e *MatchingEngine) PlaceOrder(mkt string, ot model.OrderType, o *model.Order) ([]book.Trade, error) {
+    ob, err := e.GetOrderBook(mkt)          // find the right book (or error)
+    if err != nil { return nil, err }
+    return ob.PlaceOrder(ot, o)             // delegate to it
+}
+// also: CancelOrder, Snapshot, RecoverOrderBook (replay open orders on boot),
+// and Reset (rebuild empty books — used by the admin wipe).</code></pre>
+<div class="why">
+Why a facade instead of exposing the map of books? Because the moment 20 files reach into that map directly, changing how books are stored means editing all 20. With a facade, the map is private and the outside world depends on five stable methods. It also puts the "which book, and lock it" logic in one place instead of scattering it. Same idea, bigger scale: the <code>container</code> (Chapter 20) is a facade over <em>construction</em>.
+</div>
+</div>
+<div class="chk"><code>go build ./engine-v2/...</code> compiles. The entire matching engine is done and self-contained &mdash; it has no idea a database or a web server exists, which is exactly why it's fast and testable.</div>
+
+<!-- ==================== CHAPTER 7 ==================== -->
+<h2 id="c7">Chapter 7 &mdash; DTOs: the shapes that cross layers</h2>
+<div class="why">
+The engine has its own lean <code>model.Order</code> (just what matching needs). But the API and database need a <em>richer</em> order shape (with market name, status, fees, timestamps, JSON tags). Mixing the two would couple the fast engine to web/DB concerns. So we make a separate <strong>DTO</strong> ("data transfer object") package that both the outer layers (controller) and inner layers (service) import. Because it's a shared, neutral package, it prevents an import cycle and gives us one place to control the exact JSON the API emits.
+</div>
+<div class="step">
+<span class="step-tag">STEP 7.1</span>
+<span class="file-path">dto/users.go</span>, <span class="file-path">dto/balances.go</span>, <span class="file-path">dto/orders.go</span> (representative shapes)
+<pre><code>package dto
+
+import (
+    "time"
+    "github.com/johnny1110/crypto-exchange/engine-v2/model"
+)</code></pre>
+<p><strong>Imports:</strong> <code>"time"</code> because orders/users carry timestamps; <code>.../engine-v2/model</code> because a DTO knows how to convert itself to an engine order (<code>ToEngineOrder()</code>) and stores the engine's enum types (<code>model.Side</code>, <code>model.OrderType</code>). The <code>json:"..."</code> tags below tell Go's JSON encoder the exact field names the API sends.</p>
+<pre><code>type User struct {
+    ID       string  `json:"id"`
+    Username string  `json:"username"`
+    PasswordHash string `json:"-"`   // "-" means NEVER serialize this to JSON
+    VipLevel int     `json:"vip_level"`
+    MakerFee float64 `json:"maker_fee"`
+    TakerFee float64 `json:"taker_fee"`
+    CreatedAt time.Time `json:"created_at"`
+}
+type Balance struct {
+    Asset     string  `json:"asset"`
+    Available float64 `json:"available"`
+    Locked    float64 `json:"locked"`
+    Total     float64 `json:"total"`
+}
+type Order struct {   // richer than model.Order: adds Market, Status, Fees, timestamps
+    ID, UserID, Market string
+    Side   model.Side
+    Price, OriginalSize, RemainingSize, QuoteAmount, AvgDealtPrice float64
+    Type   model.OrderType
+    Mode   model.Mode
+    Status model.OrderStatus
+    FeeRate, Fees float64
+    FeeAsset      string
+    CreatedAt, UpdatedAt time.Time
+}
+func (o *Order) ToEngineOrder() *model.Order { /* copy the fields the engine needs */ }</code></pre>
+<div class="why">
+Why not just reuse <code>model.Order</code> everywhere? Because the engine should never grow a <code>json</code> tag or a database column &mdash; the day you add a web-only field to the engine struct, you've coupled your fast core to your slow edges. Keeping <code>dto.Order</code> separate lets each evolve independently: the engine stays lean, the API shape can change freely. The <code>ToEngineOrder()</code> method is the one translation point between the two worlds.
+</div>
+<p>Also add request/response DTOs a developer creates as needed: <code>dto.OrderReq</code> (the place-order body), <code>dto.GetOrdersQueryReq</code> (paginated query params, with <code>form:"..."</code> tags for URL binding), <code>dto.PaginationResp[T]</code> (a generic paginated list), <code>dto.PlaceOrderContext</code> (carries state through the two order phases), and <code>dto.SettlementReq</code> (admin balance adjust).</p>
+</div>
+<div class="chk"><code>go build ./dto</code> compiles. You've met struct tags, the <code>json:"-"</code> secret-hiding trick, and why a translation layer exists.</div>
+
+<!-- ==================== CHAPTER 8 ==================== -->
+<h2 id="c8">Chapter 8 &mdash; The database &amp; schema</h2>
+<div class="why">
+The engine is in memory &mdash; fast, but wiped on restart. Money can't live only in RAM. So we add a database as the <em>durable truth</em>: every order, trade and balance change is written to SQLite. We choose SQLite (a single file, no server) because the whole exchange is then one binary + one file, trivial to run. This chapter opens the database and tunes it; the schema (tables) comes with it.
+</div>
+<div class="step">
+<span class="step-tag">STEP 8.1</span>
+<span class="file-path">db.go</span> (in the project root, <code>package main</code>)
+<pre><code>package main
+
+import (
+    "database/sql"
+    "fmt"
+    "github.com/johnny1110/crypto-exchange/utils"
+    "github.com/labstack/gommon/log"
+    _ "github.com/ncruces/go-sqlite3/driver"
+    _ "github.com/ncruces/go-sqlite3/embed"
+)</code></pre>
+<p><strong>Imports, and the important trick:</strong></p>
+<ul>
+  <li><code>"database/sql"</code> &mdash; Go's standard database interface. It's driver-agnostic: your code talks to <code>*sql.DB</code>, and a <em>driver</em> plugs in the actual engine.</li>
+  <li><code>"fmt"</code> &mdash; to wrap errors with context.</li>
+  <li><code>.../utils</code> &mdash; to seed the system counters from the DB at boot (<code>SetOrdersPlaced</code>).</li>
+  <li><code>.../gommon/log</code> &mdash; logging.</li>
+  <li><code>_ "github.com/ncruces/go-sqlite3/driver"</code> and <code>_ ".../embed"</code> &mdash; the <strong>blank import</strong> (<code>_</code>). We don't call anything in these packages directly; we import them <em>only</em> for their side-effect: their <code>init()</code> functions <em>register</em> a pure-Go SQLite driver under the name <code>"sqlite3"</code> so <code>sql.Open("sqlite3", ...)</code> works. The <code>_</code> tells Go "yes, I meant to import this even though I never name it." (<code>go get github.com/ncruces/go-sqlite3</code>.)</li>
+</ul>
+<pre><code>func initDB(testMode bool) (*sql.DB, error) {
+    // WAL + synchronous=NORMAL removes the per-commit fsync that otherwise caps throughput.
+    dsn := "file:/app/exg.db?_pragma=busy_timeout(10000)&amp;_pragma=journal_mode(WAL)&amp;_pragma=synchronous(NORMAL)"
+    db, err := sql.Open("sqlite3", dsn)
+    if err != nil { return nil, err }
+    db.SetMaxOpenConns(1)          // SQLite is a single writer; one connection serializes writes cleanly
+    db.SetMaxIdleConns(1)
+    if err := db.Ping(); err != nil { return nil, fmt.Errorf("ping: %w", err) }
+    // (ensure ohlcv_1min &amp; credentials tables, seed counters — added in later chapters)
+    return db, err
+}</code></pre>
+<div class="why">
+Why <code>SetMaxOpenConns(1)</code>? SQLite allows only one writer at a time; giving the pool more connections just makes them fight over the write lock. One connection serialises writes with no contention. Why the WAL pragma? By default SQLite flushes to disk (an <code>fsync</code>) on every commit &mdash; safe but slow (~60 orders/sec on a VM). WAL + <code>synchronous=NORMAL</code> skips the per-commit fsync (it only fsyncs at a checkpoint), a ~10&times; win. These are the kinds of one-line knobs a developer reaches for when a profiler shows the disk, not the code, is the bottleneck.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 8.2</span> The schema. Create <span class="file-path">doc/db_schema/schema.sql</span> with four tables: <code>users</code>, <code>balances</code> (PK <code>user_id+asset</code>, with <code>available</code>/<code>locked</code>), <code>orders</code>, <code>trades</code> &mdash; each heavily indexed for the exact queries the app runs (a user's order history, active orders per market, latest price, 24h volume). In production you'd run migrations; for this pre-launch project the tables ship inside the seeded <code>exg.db</code>, and <code>initDB(true)</code> can rebuild them from this file.</p>
+<div class="why">
+Why split <code>balance</code> into <code>available</code> and <code>locked</code> columns? Because an exchange must reserve funds against open orders so you can't spend the same dollar twice. "available" is spendable now; "locked" is reserved. Every order placement moves money available&rarr;locked; every fill or cancel moves it back or out. Two columns is the whole anti-double-spend mechanism at the storage layer.
+</div>
+</div>
+<div class="chk"><code>go build .</code> compiles the root package. The app can now open a durable database.</div>
+
+<!-- ==================== CHAPTER 9 ==================== -->
+<h2 id="c9">Chapter 9 &mdash; Repositories: SQL behind interfaces</h2>
+<div class="why">
+The services shouldn't contain raw SQL &mdash; that would weld money logic to table shapes and make it unreadable. So we put all SQL behind <strong>repository interfaces</strong>: the service says <code>balanceRepo.LockedByUserIdAndAsset(...)</code> ("freeze funds"), and the implementation hides the <code>UPDATE</code>. We deliberately hand-write SQL (no ORM) because an exchange needs precise control over locking and atomic balance moves &mdash; exactly what an ORM hides.
+</div>
+<div class="step">
+<span class="step-tag">STEP 9.1</span> The interfaces + the <code>DBExecutor</code> trick.
+<span class="file-path">repository/interface.go</span>
+<pre><code>package repository
+
+import (
+    "context"
+    "database/sql"
+    "github.com/johnny1110/crypto-exchange/dto"
+    "github.com/johnny1110/crypto-exchange/engine-v2/model"
+)
+
+// DBExecutor is satisfied by BOTH *sql.DB and *sql.Tx (both have these methods).
+// So the same repo method runs inside a transaction OR standalone — no duplicated "Tx" variants.
+type DBExecutor interface {
+    ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+    QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+    QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type IBalanceRepository interface {
+    LockedByUserIdAndAsset(ctx context.Context, db DBExecutor, userId, asset string, amt float64) error
+    UnlockedByUserIdAndAsset(ctx context.Context, db DBExecutor, userId, asset string, amt float64) error
+    GetBalancesByUserId(ctx context.Context, db DBExecutor, userId string) ([]*dto.Balance, error)
+    // ... ModifyAvailable..., BatchCreate, UpdateAsset
+}
+// also IUserRepository, IOrderRepository, ITradeRepository, OHLCVRepository</code></pre>
+<p><strong>Imports:</strong> <code>"context"</code> (Go's request-scoped handle threaded through every call, for cancellation/deadlines &mdash; it's the first argument of nearly every method); <code>"database/sql"</code> for the <code>*sql.Tx</code>/<code>*sql.DB</code> types in <code>DBExecutor</code>; <code>dto</code> because repos return DTOs; <code>model</code> for enum types in query filters.</p>
+<div class="why">
+Why the <code>DBExecutor</code> interface? Because some repo calls happen inside a transaction (placing an order) and some don't (a simple read). Without this, you'd write two copies of every method &mdash; one taking <code>*sql.DB</code>, one taking <code>*sql.Tx</code>. Since Go interfaces are satisfied automatically by any type with the right methods, and both <code>*sql.DB</code> and <code>*sql.Tx</code> have <code>ExecContext</code>/<code>QueryContext</code>, one interface covers both. This is a small idea that removes a mountain of duplication.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 9.2</span> An implementation &mdash; the atomic freeze.
+<span class="file-path">repository/impl/balances.go</span>
+<pre><code>package repositoryImpl
+
+import (
+    "context"
+    "github.com/johnny1110/crypto-exchange/dto"
+    "github.com/johnny1110/crypto-exchange/repository"
+)
+
+type balanceRepository struct{}
+func NewBalanceRepository() repository.IBalanceRepository { return &amp;balanceRepository{} }
+
+func (r *balanceRepository) LockedByUserIdAndAsset(ctx context.Context, db repository.DBExecutor,
+        userId, asset string, amt float64) error {
+    res, err := db.ExecContext(ctx, `
+        UPDATE balances SET available = available - ?, locked = locked + ?
+         WHERE user_id = ? AND asset = ? AND available &gt;= ?`,   // &lt;-- the guard
+        amt, amt, userId, asset, amt)
+    if err != nil { return err }
+    n, _ := res.RowsAffected()
+    if n == 0 { return errors.New("insufficient balance") }      // nothing matched => not enough
+    return nil
+}</code></pre>
+<p><strong>Imports:</strong> <code>"context"</code> (threaded ctx); <code>dto</code> (return types); <code>repository</code> (to name the interface it implements and the <code>DBExecutor</code> type). The constructor returns the <em>interface</em>, not the struct &mdash; callers depend on the contract.</p>
+<div class="why">
+Look at <code>AND available &gt;= ?</code>. That single clause makes "check you have enough" and "move the money" one <em>atomic</em> step inside the database. Even if two withdrawals run at the exact same instant, the database will only update a row that still qualifies &mdash; so you physically cannot move money you no longer have. This is where the double-spend race from the concepts is actually defeated: at the storage layer, in SQL, not with application-level guessing. The <code>?</code> placeholders pass values <em>separately</em> from the query text, which is also how you're immune to SQL injection.
+</div>
+</div>
+<div class="chk"><code>go build ./repository/...</code> compiles. Storage is now behind clean, swappable interfaces, with the money-safety rule enforced in SQL.</div>
+
+<!-- ==================== CHAPTER 10 ==================== -->
+<h2 id="c10">Chapter 10 &mdash; The transaction helper</h2>
+<div class="why">
+Placing an order writes several rows (freeze, insert, trades). If any write fails, they must <em>all</em> undo &mdash; you can't half-apply a trade. That's a database <strong>transaction</strong>: begin, do the writes, commit if all good, roll back if not. Writing begin/commit/rollback by hand at every call site invites the one bug that corrupts balances: a forgotten rollback. So we write the pattern <em>once</em>, as a helper that takes your code as a function.
+</div>
+<div class="step">
+<span class="step-tag">STEP 10.1</span>
+<span class="file-path">service/impl/txn.go</span>
+<pre><code>package serviceImpl
+
+import (
+    "context"
+    "database/sql"
+)
+
+func WithTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) (err error) {
+    tx, err := db.BeginTx(ctx, nil)          // open a transaction
+    if err != nil { return err }
+    defer func() {                           // runs however we leave this function
+        if p := recover(); p != nil {        // a panic happened mid-write
+            tx.Rollback(); panic(p)
+        } else if err != nil {               // fn returned an error
+            tx.Rollback()
+        } else {                             // clean success
+            err = tx.Commit()
+        }
+    }()
+    err = fn(tx)                             // run YOUR writes
+    return
+}</code></pre>
+<p><strong>Imports:</strong> <code>"context"</code> for the request handle passed to <code>BeginTx</code>; <code>"database/sql"</code> for <code>*sql.DB</code>/<code>*sql.Tx</code>. Nothing else &mdash; this is pure plumbing.</p>
+<div class="why">
+The parameter <code>fn func(tx *sql.Tx) error</code> is the key: in Go, functions are values you can pass around. The caller hands its writes in as <code>fn</code>; <code>WithTx</code> wraps them in the begin/commit/rollback envelope. Because commit/rollback live in a <code>defer</code>, they run no matter how the function exits &mdash; normal return, error, or even a panic &mdash; so <em>you cannot forget them</em>. That guarantee is the entire reason this helper exists, and you'll wrap every money-write in it. (Named return <code>(err error)</code> lets the deferred code read and even set <code>err</code> to the commit's error.)
+</div>
+</div>
+<div class="chk">You now have the safety net every write path will use. Next we write the services that use it.</div>
+
+<!-- ==================== CHAPTER 11 ==================== -->
+<h2 id="c11">Chapter 11 &mdash; Services: users, balances, and the two-phase order</h2>
+<div class="why">
+Repositories move rows; the <strong>service</strong> layer holds the <em>business rules</em> &mdash; "hash the password", "freeze the right asset", "settle both sides of a trade with fees". This is where money correctness lives. Services depend only on <em>interfaces</em> (repos + engine), so they're testable with fakes and swappable underneath. We build the user service (register/login) and the order service (the crown-jewel two-phase placement).
+</div>
+<div class="step">
+<span class="step-tag">STEP 11.1</span> The user service: register &amp; login.
+<span class="file-path">service/impl/users.go</span>
+<pre><code>package serviceImpl
+
+import (
+    "context"
+    "database/sql"
+    "github.com/google/uuid"
+    "golang.org/x/crypto/bcrypt"
+    "github.com/johnny1110/crypto-exchange/dto"
+    "github.com/johnny1110/crypto-exchange/repository"
+    "github.com/johnny1110/crypto-exchange/security"
+    "github.com/johnny1110/crypto-exchange/service"
+)</code></pre>
+<p><strong>Every import, why:</strong></p>
+<ul>
+  <li><code>"context"</code> &mdash; the request handle threaded to repos.</li>
+  <li><code>"database/sql"</code> &mdash; the service holds a <code>*sql.DB</code> to open transactions with <code>WithTx</code>.</li>
+  <li><code>github.com/google/uuid</code> &mdash; to generate unique IDs and login tokens (<code>uuid.New()</code>). (<code>go get github.com/google/uuid</code>.)</li>
+  <li><code>golang.org/x/crypto/bcrypt</code> &mdash; to <em>hash</em> passwords (never store them plain) and check them on login. (<code>go get golang.org/x/crypto</code>.)</li>
+  <li><code>dto</code> &mdash; the User/request shapes.</li>
+  <li><code>repository</code> &mdash; the repo interfaces it depends on.</li>
+  <li><code>security</code> &mdash; the token cache to store the login token.</li>
+  <li><code>service</code> &mdash; to name the interface (<code>service.IUserService</code>) it returns.</li>
+</ul>
+<pre><code>func (s *userService) Register(ctx, username, password string) (*dto.User, error) {
+    hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost) // never store plaintext
+    user := &amp;dto.User{ID: uuid.New().String(), Username: username, PasswordHash: string(hash), /* fees... */}
+    return user, WithTx(ctx, s.db, func(tx *sql.Tx) error {
+        if err := s.userRepo.Insert(ctx, tx, user); err != nil { return err }
+        return s.balanceRepo.BatchCreate(ctx, tx, user.ID, settings.GetAllAssets()) // zeroed balances
+    })
+}
+func (s *userService) Login(ctx, username, password string) (string, error) {
+    user, _ := s.userRepo.GetUserByUsername(ctx, s.db, username)
+    if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+        return "", errors.New("bad credentials")
+    }
+    token := uuid.New().String()
+    s.credentialCache.Put(token, user)   // remember token -> user (Chapter 12)
+    return token, nil
+}</code></pre>
+<div class="why">
+Why hash the password with bcrypt instead of storing it? If the database ever leaks, plaintext passwords are catastrophic. bcrypt stores a one-way hash: you can <em>check</em> a password (hash it and compare) but never recover it. It's also deliberately slow to compute, which frustrates brute-force attackers. This is non-negotiable in any system that holds credentials.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 11.2</span> The order service &mdash; two-phase placement.
+<span class="file-path">service/impl/orders.go</span>
+<pre><code>import (
+    "context"
+    "database/sql"
+    "github.com/johnny1110/crypto-exchange/engine-v2/core"
+    "github.com/johnny1110/crypto-exchange/engine-v2/model"
+    "github.com/johnny1110/crypto-exchange/ohlcv"
+    "github.com/johnny1110/crypto-exchange/repository"
+    "github.com/johnny1110/crypto-exchange/service/serviceHelper"
+    "github.com/johnny1110/crypto-exchange/utils"
+    // + dto, service, settings
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>core</code> to call the matching engine; <code>model</code> for order enums; <code>ohlcv</code> to push trades into the candlestick stream; <code>repository</code> for the three repos it uses; <code>serviceHelper</code> for <code>WithTx</code> + settlement math; <code>utils</code> to bump the system counters. Each import is a dependency you can point to in the wiring diagram.</p>
+<pre><code>func (s *orderService) executeOrderPlacementPhase(ctx, orderCtx *dto.PlaceOrderContext, isMarket bool) error {
+    return WithTx(ctx, s.db, func(tx *sql.Tx) error {                 // ONE transaction
+        // 1. freeze funds
+        if err := s.balanceRepo.LockedByUserIdAndAsset(ctx, tx,
+            orderCtx.UserID, orderCtx.Assets.FreezeAsset, orderCtx.Assets.FreezeAmt); err != nil {
+            return ErrInsufficientBalance }
+        // 2. insert the order (status NEW)
+        if err := s.orderRepo.Insert(ctx, tx, orderCtx.OrderDTO); err != nil { return UnknownError }
+        // 3. MATCH in the engine (Chapter 5) -> trades
+        engineOrder := serviceHelper.NewEngineOrderByOrderDto(orderCtx.OrderDTO)
+        trades, err := s.engine.PlaceOrder(orderCtx.Market, orderCtx.Request.OrderType, engineOrder)
+        if err != nil { return err }
+        orderCtx.SyncTradeResult(engineOrder, trades)                // 4. reflect results
+        if len(orderCtx.Trades) &gt; 0 {
+            s.tradeRepo.BatchInsert(ctx, tx, trades)                 // 5. persist trades
+            for _, t := range trades { s.klineTradeStream.SyncTrade(&amp;ohlcv.Trade{ /* ... */ }) } // 6. feed charts
+        }
+        utils.IncOrdersPlaced(); utils.AddTrades(int64(len(trades))) // 7. counters
+        return nil                                                   // nil => commit; error => rollback all
+    })
+}</code></pre>
+<p>Then <code>executeTradeSettlementPhase</code> applies the balance/fee moves for each trade (via <code>serviceHelper.ProcessTradeSettlement</code>). Two phases, named failure domains (concepts E.5).</p>
+<div class="why">
+Why does the freeze/insert/match/persist all sit inside one <code>WithTx</code>? Because they must be atomic: if the trade insert fails, the freeze and the order row must vanish too, or a user's money is stuck in limbo. Wrapping the block in <code>WithTx</code> gives exactly that &mdash; all-or-nothing. Notice the engine call happens <em>inside</em> the transaction: we match in memory, and only make it durable if everything commits.
+</div>
+</div>
+<div class="chk"><code>go build ./service/...</code> compiles (after the small service/serviceHelper + interface files). The money brain is done.</div>
+
+<!-- ==================== CHAPTER 12 ==================== -->
+<h2 id="c12">Chapter 12 &mdash; Security: the token store</h2>
+<div class="why">
+Login handed back a token; every later request presents it. Something must map <em>token &rarr; which user</em>. That's the credential cache. We back it with a DB table so a token survives a server restart (a memory-only cache would log everyone out on every deploy).
+</div>
+<div class="step">
+<span class="step-tag">STEP 12.1</span>
+<span class="file-path">security/credential.go</span>
+<pre><code>package security
+
+import (
+    "database/sql"
+    "errors"
+    "sync"
+    "github.com/johnny1110/crypto-exchange/dto"
+)</code></pre>
+<p><strong>Imports:</strong> <code>"database/sql"</code> to persist/rehydrate tokens from the <code>credentials</code> table; <code>"errors"</code> for "invalid credential"; <code>"sync"</code> for a <code>RWMutex</code> guarding the in-memory map (many reads on every request, rare writes at login); <code>dto</code> for the <code>*dto.User</code> it caches.</p>
+<pre><code>type CredentialCache struct {
+    db         *sql.DB
+    mu         sync.RWMutex
+    tokenCache map[string]*dto.User
+}
+func (c *CredentialCache) Put(token string, user *dto.User) {
+    c.mu.Lock(); c.tokenCache[token] = user; c.mu.Unlock()
+    c.db.Exec(`INSERT OR REPLACE INTO credentials(token, user_id) VALUES(?, ?)`, token, user.ID)
+}
+func (c *CredentialCache) Get(token string) (*dto.User, error) {
+    c.mu.RLock(); u, ok := c.tokenCache[token]; c.mu.RUnlock()
+    if ok { return u, nil }
+    // cache miss (e.g. after restart): rehydrate from the DB
+    // ... SELECT user_id FROM credentials, then load the user, cache it, return
+}</code></pre>
+<div class="why">
+Why the <code>RWMutex</code> and not a plain map? The map is read on <em>every authenticated request</em> (very frequent) and written only at login (rare). An <code>RWMutex</code> lets many readers proceed at once and only blocks them briefly for a write &mdash; the right lock for a read-heavy workload. Why persist to a table at all? So a restart doesn't invalidate every session; on a cache miss we rebuild the user from the durable row. (This exact fix is in the working copy's history.)
+</div>
+</div>
+<div class="chk"><code>go build ./security</code> compiles. Auth has a durable home.</div>
+
+<!-- ==================== CHAPTER 13 ==================== -->
+<h2 id="c13">Chapter 13 &mdash; Middleware: auth, CORS, errors</h2>
+<div class="why">
+Some behaviour must wrap <em>every</em> request &mdash; check the token, allow the browser (CORS), turn panics/errors into clean JSON. Copying that into every handler would be error-prone. <strong>Middleware</strong> is the answer: functions the router runs before/around your handlers, in a chain.
+</div>
+<div class="step">
+<span class="step-tag">STEP 13.1</span>
+<span class="file-path">middleware/middleware.go</span>
+<pre><code>package middleware
+
+import (
+    "github.com/gin-gonic/gin"
+    "github.com/gin-contrib/cors"
+    "github.com/johnny1110/crypto-exchange/security"
+    "net/http"
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>github.com/gin-gonic/gin</code> &mdash; the HTTP framework; middleware are <code>gin.HandlerFunc</code>s (<code>go get github.com/gin-gonic/gin</code>). <code>github.com/gin-contrib/cors</code> &mdash; a ready-made CORS middleware so the browser front-end may call the API (<code>go get github.com/gin-contrib/cors</code>). <code>security</code> &mdash; the auth middleware resolves the token via the credential cache. <code>net/http</code> &mdash; for status codes like <code>http.StatusUnauthorized</code>.</p>
+<pre><code>func AuthMiddleware(cache *security.CredentialCache) gin.HandlerFunc {
+    return func(ctx *gin.Context) {
+        token := ctx.GetHeader("Authorization")
+        user, err := cache.Get(token)                 // token -> user (Chapter 12)
+        if err != nil {
+            ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code":"..."})
+            return                                    // stop the chain; the handler never runs
+        }
+        ctx.Set("user", user); ctx.Set("userId", user.ID)  // hand the user to the handler
+        ctx.Next()                                    // continue to the next link
+    }
+}</code></pre>
+<div class="why">
+Why return a function that returns a function? The outer function captures a dependency (the cache) once; the inner one runs per request. This "closure captures config" shape is how you give middleware what it needs without globals. <code>ctx.Set</code> puts the resolved user into a per-request bag so the actual handler can read it without re-doing auth. <code>ctx.Abort...</code> stops the chain on a bad token so protected handlers never run unauthenticated.
+</div>
+</div>
+<div class="chk"><code>go build ./middleware</code> compiles.</div>
+
+<!-- ==================== CHAPTER 14 ==================== -->
+<h2 id="c14">Chapter 14 &mdash; Controllers: the HTTP handlers</h2>
+<div class="why">
+A <strong>controller</strong> is thin on purpose: pull the user + inputs off the request, call one service method, shape the JSON reply. No business logic lives here &mdash; that's the service's job. Keeping controllers thin means the same logic can be reached from a test, a script, or another transport without duplication.
+</div>
+<div class="step">
+<span class="step-tag">STEP 14.1</span>
+<span class="file-path">controller/orders.go</span>
+<pre><code>package controller
+
+import (
+    "github.com/gin-gonic/gin"
+    "github.com/johnny1110/crypto-exchange/dto"
+    "github.com/johnny1110/crypto-exchange/service"
+    "net/http"
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>gin</code> &mdash; handlers take a <code>*gin.Context</code>; <code>dto</code> &mdash; to bind the request body and shape the response; <code>service</code> &mdash; the controller holds a <code>service.IOrderService</code> interface (not the concrete type &mdash; so it's testable); <code>net/http</code> &mdash; status codes.</p>
+<pre><code>func (c OrderController) PlaceOrder(ctx *gin.Context) {
+    user := ctx.MustGet("user").(*dto.User)          // set by AuthMiddleware (Chapter 13)
+    market := ctx.Param("market")                    // from the URL /orders/:market
+    var req dto.OrderReq
+    if err := ctx.ShouldBindJSON(&amp;req); err != nil { ctx.JSON(400, ...); return }
+    result, err := c.orderService.PlaceOrder(ctx.Request.Context(), market, user, &amp;req)
+    if err != nil { ctx.JSON(400, HandleCodeError(...)); return }
+    ctx.JSON(http.StatusOK, HandleSuccess(result))   // {code, message, timestamp, data}
+}</code></pre>
+<div class="why">
+Why does the controller depend on <code>service.IOrderService</code> (the interface) and not the concrete <code>orderService</code>? So you can hand it a fake in a test, and so the web layer never drags in the engine/DB. Notice how little it does: read inputs, call one method, format output. If you ever find business rules creeping into a controller, that's a smell &mdash; push them down into the service.
+</div>
+</div>
+<div class="step"><span class="step-tag">STEP 14.2</span> Write the sibling controllers the same way: <code>users.go</code> (Register/Login/Profile/Logout), <code>balances.go</code>, <code>orderbooks.go</code>, <code>markets.go</code>, <code>admins.go</code> (manual balance adjust; the reset). Each is: read inputs &rarr; call the matching service &rarr; shape the reply.</div>
+<div class="chk"><code>go build ./controller</code> compiles.</div>
+
+<!-- ==================== CHAPTER 15 ==================== -->
+<h2 id="c15">Chapter 15 &mdash; The router: wiring URLs to handlers</h2>
+<div class="why">
+The router is the map from URL &rarr; handler, and where the middleware chain is assembled. Public routes need no token; private ones sit behind <code>AuthMiddleware</code>; admin routes behind an admin token. Grouping them makes the security boundary obvious at a glance.
+</div>
+<div class="step">
+<span class="step-tag">STEP 15.1</span>
+<span class="file-path">router.go</span> (<code>package main</code>)
+<pre><code>import (
+    "github.com/gin-gonic/gin"
+    "github.com/johnny1110/crypto-exchange/container"
+    "github.com/johnny1110/crypto-exchange/controller"
+    "github.com/johnny1110/crypto-exchange/middleware"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
+    "net/http"
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>gin</code> (the router); <code>container</code> (to pull the built controllers/services out of the wiring); <code>controller</code> &amp; <code>middleware</code> (the things being wired); <code>promhttp</code> (serves the <code>/metrics</code> endpoint for Prometheus &mdash; <code>go get github.com/prometheus/client_golang</code>); <code>net/http</code> (status codes).</p>
+<pre><code>public := router.Group("/api/v1")
+{
+    public.POST("/users/register", userController.Register)
+    public.POST("/users/login",    userController.Login)
+    public.GET("/markets",         marketDataController.GetAllMarketsData)
+    public.GET("/orderbooks/:market/snapshot", orderBookController.OrderbooksSnapshot)
+}
+private := router.Group("/api/v1")
+private.Use(middleware.AuthMiddleware(c.CredentialCache))   // &lt;-- everything below needs a token
+{
+    private.POST("/orders/:market",   orderController.PlaceOrder)
+    private.DELETE("/orders/:orderId", orderController.CancelOrder)
+    private.GET("/balances",           balanceController.GetBalances)
+}</code></pre>
+<div class="why">
+Why groups? <code>private.Use(AuthMiddleware)</code> applies auth to <em>every</em> route in that group at once &mdash; you can't forget it on one endpoint. The public/private split becomes visually obvious, which is exactly what you want for a security boundary: the structure of the file <em>is</em> the access-control policy.
+</div>
+</div>
+<div class="chk"><code>go build .</code> &mdash; the HTTP half of the app is complete. Next: the real-time half.</div>
+
+<!-- ==================== CHAPTER 16 ==================== -->
+<h2 id="c16">Chapter 16 &mdash; OHLCV: turning trades into candlesticks</h2>
+<div class="why">
+A price chart needs candlesticks &mdash; open/high/low/close per time bucket. Trades arrive as a fast stream; the chart wants tidy 1-minute (etc.) bars. So we build an <strong>aggregator</strong>: trades flow into a channel, a background worker folds each trade into the current bucket for every interval, and finished bars are flushed to the DB in batches. We decouple "a trade happened" from "a candle got written" with a channel so a burst of trades never blocks the matching path.
+</div>
+<div class="step">
+<span class="step-tag">STEP 16.1</span> The trade stream (a buffered channel wrapper).
+<span class="file-path">ohlcv/trade_stream.go</span>
+<pre><code>package ohlcv
+
+import "sync"
+
+type Trade struct { Symbol string; Price, Volume float64; Timestamp int64 }
+
+type TradeStream interface { SyncTrade(t *Trade); Subscribe() &lt;-chan *Trade }
+
+type simpleTradeStream struct {
+    ch chan *Trade
+}
+func NewSimpleTradeStream(buf int) TradeStream { return &amp;simpleTradeStream{ch: make(chan *Trade, buf)} }
+func (s *simpleTradeStream) SyncTrade(t *Trade) {
+    select {
+    case s.ch &lt;- t:              // enqueue
+    default:                     // buffer full: drop rather than block the matching path
+    }
+}</code></pre>
+<p><strong>Imports:</strong> just <code>"sync"</code> (if you guard subscriber lists). The core idea is the buffered <code>chan *Trade</code>. The <code>select { case ch&lt;-t: default: }</code> is a <em>non-blocking send</em>: if the buffer is full we drop the trade for charting rather than stall the order that produced it. Charts may skip a tick; orders may never wait.</p>
+</div>
+<div class="step">
+<span class="step-tag">STEP 16.2</span> The aggregator loop.
+<span class="file-path">ohlcv/aggregator.go</span>
+<pre><code>import (
+    "context"
+    "sync"
+    "time"
+    "github.com/johnny1110/crypto-exchange/utils"
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>"context"</code> to stop the loop on shutdown; <code>"sync"</code> to guard per-symbol candle state; <code>"time"</code> to compute bucket boundaries and drive the flush ticker; <code>utils</code> for price rounding. The aggregator (created in <code>container.go</code> with a <code>BatchSize:100, FlushInterval:1s</code> config) reads from the stream, updates the open/high/low/close of the current bar for each interval, and on a <code>time.Ticker</code> flushes closed bars to <code>OHLCVRepository</code> in batches (fewer, larger writes = less DB pressure).</p>
+<div class="why">
+Why aggregate in memory and flush in batches instead of writing every trade? Because writing a row per trade would hammer the single SQLite writer &mdash; the same bottleneck we tuned in Chapter 8. Folding trades into a handful of in-memory bars and flushing periodically turns thousands of trades into a few writes. This is the classic "batch the writes" pattern, and it's why the chart keeps up under load. (One trap we hit: seeding the first candle from a bogus 0.01 price stretched the chart's Y-axis from 0.01 to 65000 and looked frozen &mdash; so on boot we seed from the last traded price and purge any candle with <code>low_price &le; 0.02</code>.)
+</div>
+</div>
+<div class="chk"><code>go build ./ohlcv/...</code> compiles. Trades now become chart data without touching the hot path.</div>
+
+<!-- ==================== CHAPTER 17 ==================== -->
+<h2 id="c17">Chapter 17 &mdash; WebSocket: pushing live data to browsers</h2>
+<div class="why">
+REST is pull: the browser must ask, repeatedly, for fresh prices. That's wasteful and laggy. <strong>WebSocket</strong> is push: the client connects once and the server streams updates. We build a <em>hub</em> &mdash; one goroutine that owns the set of clients and fans messages out over channels &mdash; so no two goroutines ever touch the client map at once (no locks, no races). Public channels (orderbook, ohlcv, markets, sysstats) broadcast to all; private channels (user_data) go only to the owning token.
+</div>
+<div class="step">
+<span class="step-tag">STEP 17.1</span> The client &amp; the hub.
+<span class="file-path">ws/client.go</span>, <span class="file-path">ws/hub.go</span>
+<pre><code>import (
+    "context"
+    "github.com/gorilla/websocket"
+    "sync"
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>github.com/gorilla/websocket</code> &mdash; the WebSocket implementation (upgrades an HTTP request to a socket; <code>go get github.com/gorilla/websocket</code>); <code>"context"</code> to stop the hub on shutdown; <code>"sync"</code> only where a helper map needs guarding. The hub itself avoids locks by owning state in one goroutine.</p>
+<pre><code>type Client struct {
+    conn         *websocket.Conn
+    Send         chan []byte          // buffered outbound queue for THIS client (buffer 1024)
+    subscriptions map[string]bool     // which channels it wants
+    token        string               // "" until it authenticates for user_data
+}
+type Hub struct {
+    clients    map[*Client]bool
+    register   chan *Client
+    unregister chan *Client
+    broadcast  chan *BroadcastMsg
+}
+func (h *Hub) Run(ctx context.Context) {
+    for {
+        select {                                  // ONE goroutine owns the client set
+        case c := &lt;-h.register:   h.clients[c] = true
+        case c := &lt;-h.unregister: delete(h.clients, c); close(c.Send)
+        case m := &lt;-h.broadcast:
+            for c := range h.clients {
+                if c.wants(m.Channel, m.Token) {  // public OR its own private data
+                    select { case c.Send &lt;- m.Data: default: /* slow client: drop */ }
+                }
+            }
+        }
+    }
+}</code></pre>
+<div class="why">
+Why funnel everything through one <code>select</code> loop instead of locking the client map? Because the map is mutated (connect/disconnect) and read (broadcast) constantly. A mutex would serialise all of it and invite deadlocks. Instead, the hub is the <em>only</em> goroutine that touches the map; everyone else sends it a message on a channel. That's the "share memory by communicating" philosophy &mdash; concurrency without locks. Each client has its own buffered <code>Send</code> channel, and a non-blocking send means one slow browser can't stall the broadcast to everyone else (we raised this buffer 256&rarr;1024 so bursty market data doesn't drop). The per-client <code>token</code> is the whole public/private split: a message tagged with a token only reaches the matching client.
+</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 17.2</span> The channel model.
+<span class="file-path">ws/model.go</span> &mdash; define the channel names the front-end subscribes to: <code>ORDERBOOK</code>, <code>OHLCV</code>, <code>MARKETS</code>, <code>SYSSTATS</code> (public), and <code>USER_DATA</code> (private, needs a token). Each subscribe request carries params (e.g. <code>{market: "BTC-USDT"}</code>). <strong>Watch this exact bug:</strong> the request param key must match what the backend reads &mdash; the front-end sending <code>{symbol:...}</code> while the backend reads <code>{market:...}</code> silently yields an empty market and no data. Names are a contract; keep both sides identical.</div>
+<div class="chk"><code>go build ./ws/...</code> compiles. The server can now push.</div>
+
+<!-- ==================== CHAPTER 18 ==================== -->
+<h2 id="c18">Chapter 18 &mdash; Schedulers: the heartbeats</h2>
+<div class="why">
+Some work must happen on a clock, not per-request: snapshot the order book every 300ms, push WS frames every 400ms&ndash;1s, refresh 24h market stats every 30s, top up AMM liquidity every 5 min. Each is a <strong>scheduler</strong> &mdash; a goroutine with a <code>time.Ticker</code>. Centralising them keeps timing in one place and off the request path.
+</div>
+<div class="step">
+<span class="step-tag">STEP 18.1</span> The WS data feeder (the one that makes the UI feel alive).
+<span class="file-path">scheduler/ws_data_feeder.go</span>
+<pre><code>import (
+    "context"
+    "time"
+    "github.com/johnny1110/crypto-exchange/ohlcv"
+    "github.com/johnny1110/crypto-exchange/security"
+    "github.com/johnny1110/crypto-exchange/service"
+    "github.com/johnny1110/crypto-exchange/utils"
+    "github.com/johnny1110/crypto-exchange/ws"
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>"context"</code>/<code>"time"</code> for the ticker + shutdown; <code>ohlcv</code> to read the latest candle; <code>security</code> to resolve tokens for private user_data pushes; <code>service</code> to fetch the order-book/market snapshots and a user's orders/balances; <code>utils</code> to read the live orders/sec + duration counters for the <code>sysstats</code> channel; <code>ws</code> to broadcast. Every import is one data source this job stitches into WebSocket frames.</p>
+<pre><code>func (j *WSDataFeederJob) Start(ctx context.Context) {
+    fast := time.NewTicker(400 * time.Millisecond) // orderbook: feels instant
+    slow := time.NewTicker(1 * time.Second)        // ohlcv, markets, sysstats, user_data
+    for {
+        select {
+        case &lt;-ctx.Done(): return
+        case &lt;-fast.C:  j.pushOrderbooks()          // broadcast to ORDERBOOK subscribers
+        case &lt;-slow.C:
+            j.pushOHLCV(); j.pushMarkets()
+            j.pushSysStats(utils.SnapshotStats())   // orders/sec, trades/sec, totals, duration
+            j.pushUserData()                        // per-token private orders+balances
+        }
+    }
+}</code></pre>
+<div class="why">
+Why two tickers at different rates? The order book changes every match &mdash; 400ms makes it feel live. Candles, 24h stats and counters change slowly &mdash; 1s is plenty and saves work. Why push from a scheduler instead of on every trade? Because at hundreds of trades/sec you'd flood browsers; a fixed cadence <em>coalesces</em> many changes into one frame. This is the "snapshot + interval push" model borrowed from real exchanges: the UI shows the latest state at a steady beat, not every micro-event. The order-book snapshot itself is produced by a separate 300ms scheduler and cached, so the feeder just forwards the freshest cached copy &mdash; cheap.
+</div>
+</div>
+<div class="chk"><code>go build ./scheduler/...</code> compiles. The system now has a pulse.</div>
+
+<!-- ==================== CHAPTER 19 ==================== -->
+<h2 id="c19">Chapter 19 &mdash; AMM: a bot that provides liquidity</h2>
+<div class="why">
+An empty order book is a dead market &mdash; no one can trade if no one is quoting. An <strong>automated market maker</strong> is a built-in bot that continuously posts buy and sell orders around a reference price, so there's always something to trade against. It's how the demo looks like a live venue instead of a ghost town. Crucially, it reuses the <em>exact same</em> service methods a human uses &mdash; it has no special path.
+</div>
+<div class="step">
+<span class="step-tag">STEP 19.1</span> The AMM proxy + strategy.
+<span class="file-path">service/impl/amm/</span> (proxy + market-maker)
+<pre><code>import (
+    "context"
+    "net/http"
+    "time"
+    "github.com/johnny1110/crypto-exchange/dto"
+    "github.com/johnny1110/crypto-exchange/service"
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>"context"</code>/<code>"time"</code> for scheduling its quoting cycle; <code>"net/http"</code> because the proxy can also drive the flow over the real HTTP API (an <code>*http.Client</code> is injected, see <code>container.go</code> line 149); <code>dto</code> for the order requests it builds; <code>service</code> because it calls <code>IOrderService.PlaceOrder</code> / <code>IBalanceService</code> / <code>IOrderBookService</code> &mdash; the same interfaces every controller uses.</p>
+<div class="why">
+The important lesson here isn't the trading strategy &mdash; it's that the bot is <em>just another client of the services</em>. It freezes funds, places orders and settles through the identical two-phase path from Chapter 11. Because the business rules live in the service layer (not in controllers), a completely different caller &mdash; a bot on a timer &mdash; gets all the same money-safety guarantees for free. That's the payoff of the layering we've built: one brain, many mouths. The <code>LQDTScheduler</code> (Chapter 18) is what wakes it up every 5 minutes.
+</div>
+</div>
+<div class="chk"><code>go build ./service/impl/amm/...</code> compiles. The market can now quote itself. Next: wire it all together and boot.</div>
+
+<!-- ==================== CHAPTER 20 ==================== -->
+<h2 id="c20">Chapter 20 &mdash; The container: the composition root</h2>
+<div class="why">
+Every layer we built depends only on <em>interfaces</em>, never on concrete types &mdash; that's what kept them testable and decoupled. But <em>someone</em> has to create the real objects and hand each layer its dependencies. That someone is the <strong>container</strong>: the single place ("composition root") where the whole graph is constructed, bottom-up. Nothing else in the codebase does <code>new X()</code> for a service; they receive what they need. Change an implementation? You edit one file.
+</div>
+<div class="step">
+<span class="step-tag">STEP 20.1</span> This is your real file &mdash; <span class="file-path">container/container.go</span>. Build it in dependency order: repos first (they need only the DB), then the OHLCV aggregator, then services (they need repos + engine), then WebSocket hub, then the AMM proxy, then schedulers (they need services + hub).
+<pre><code>import (
+    "context"
+    "database/sql"
+    "github.com/johnny1110/crypto-exchange/engine-v2/core"
+    "github.com/johnny1110/crypto-exchange/external"
+    "github.com/johnny1110/crypto-exchange/ohlcv"
+    "github.com/johnny1110/crypto-exchange/repository"
+    repositoryImpl "github.com/johnny1110/crypto-exchange/repository/impl"
+    "github.com/johnny1110/crypto-exchange/scheduler"
+    "github.com/johnny1110/crypto-exchange/security"
+    "github.com/johnny1110/crypto-exchange/service"
+    serviceImpl "github.com/johnny1110/crypto-exchange/service/impl"
+    "github.com/johnny1110/crypto-exchange/service/impl/amm"
+    "github.com/johnny1110/crypto-exchange/service/impl/metrics"
+    "github.com/johnny1110/crypto-exchange/settings"
+    "github.com/johnny1110/crypto-exchange/ws"
+    "log"; "net/http"; "time"
+)</code></pre>
+<p><strong>Why the container imports nearly everything:</strong> it is the one file allowed to know every concrete type, because assembling the graph is its whole job. Note the <em>aliased</em> imports &mdash; <code>repositoryImpl "…/repository/impl"</code> and <code>serviceImpl "…/service/impl"</code>: two packages would otherwise both want the name from their path, so we rename them at import to keep the constructor calls readable (<code>repositoryImpl.NewUserRepository()</code>). <code>external</code> is here only to fetch an initial index price for the first candle; <code>log</code> to fatal-out if wiring fails.</p>
+<pre><code>func NewContainer(db *sql.DB, engine *core.MatchingEngine) *Container {
+    c := &amp;Container{DB: db, MatchingEngine: engine}
+    c.CredentialCache = security.NewCredentialCache(c.DB)
+    c.initRepositories()  // UserRepo, BalanceRepo, OrderRepo, TradeRepo, OHLCVRepo
+    c.initOHLCVAgg()      // trade stream + aggregator, seeded per market
+    c.initServices()      // each service gets its repos + engine + caches
+    c.initWS()            // hub, then `go c.WSHub.Run(ctx)`
+    c.initProxy()         // AMM proxy gets the services + an *http.Client
+    c.initScheduler()     // market-data, orderbook-snapshot, LQDT, ws-feeder
+    c.initMetrics()
+    return c
+}
+func (c *Container) initServices() {
+    c.UserService  = serviceImpl.NewIUserService(c.DB, c.UserRepo, c.BalanceRepo, c.CredentialCache)
+    c.OrderService = serviceImpl.NewIOrderService(c.DB, c.MatchingEngine, c.OrderRepo,
+                                                  c.TradeRepo, c.BalanceRepo, c.OHLCVTradeStream)
+    // ... OrderBookService, AdminService, CacheService, MarketDataService, BalanceService
+}</code></pre>
+<div class="why">
+Read <code>initServices</code> like a wiring diagram: every argument is a dependency you built earlier. <code>NewIOrderService</code> receives the DB (for <code>WithTx</code>), the engine (to match), three repos (to persist), and the trade stream (to feed charts) &mdash; exactly the imports from Chapter 11 made concrete. Because construction is centralised and ordered, the compiler enforces the layering: you literally cannot build a service before the things it needs exist. This is dependency injection with no framework &mdash; just a function that passes arguments. Notice <code>go c.WSHub.Run(ctx)</code> in <code>initWS</code>: the hub's owner-goroutine (Chapter 17) is launched right here.
+</div>
+</div>
+<div class="chk"><code>go build ./container</code> compiles. The whole object graph now has one birthplace.</div>
+
+<!-- ==================== CHAPTER 21 ==================== -->
+<h2 id="c21">Chapter 21 &mdash; main.go: boot order &amp; recovery</h2>
+<div class="why">
+<code>main()</code> is the ignition. Its job is a precise <em>sequence</em>: open the DB, build the engine, <strong>recover</strong> the order book from disk (open orders survive a restart), build the container, start schedulers, mount routes, listen. Order matters &mdash; you can't recover into an engine you haven't built, or serve routes before the container exists.
+</div>
+<div class="step">
+<span class="step-tag">STEP 21.1</span>
+<span class="file-path">main.go</span> (<code>package main</code>)
+<pre><code>import (
+    "context"
+    "github.com/gin-gonic/gin"
+    "github.com/johnny1110/crypto-exchange/container"
+    "github.com/johnny1110/crypto-exchange/engine-v2/core"
+    "github.com/johnny1110/crypto-exchange/settings"
+    "github.com/labstack/gommon/log"
+    "os"; "os/signal"; "syscall"
+)</code></pre>
+<p><strong>Imports, why:</strong> <code>gin</code> to create the HTTP server; <code>container</code> to build the graph; <code>core</code> to construct the engine and register each market; <code>settings</code> for the market list; <code>gommon/log</code> for boot logs; <code>os/signal</code>+<code>syscall</code> to catch Ctrl-C / SIGTERM for a <em>graceful</em> shutdown (drain, close the DB) instead of a hard kill.</p>
+<pre><code>func main() {
+    db, err := initDB(true)                       // Chapter 8 (true = seed schema+mock data)
+    if err != nil { log.Fatal(err) }
+
+    engine := core.NewMatchingEngine()            // Chapter 6
+    for _, m := range settings.ALL_MARKETS {      // register every market's order book
+        engine.AddMarket(m)
+    }
+    recoverOrderBook(db, engine)                  // reload OPEN orders from DB into memory
+
+    c := container.NewContainer(db, engine)       // Chapter 20 — build everything
+    c.StartSchedulers()                           // heartbeats on (Chapter 18)
+    defer c.Cleanup()                             // close DB on exit
+
+    router := gin.New()
+    RegisterRoutes(router, c)                     // Chapter 15
+    router.Run(":3000")                           // listen
+}</code></pre>
+<div class="why">
+Why <code>recoverOrderBook</code> before serving? The engine lives in memory; a restart would otherwise "lose" every resting order even though it's safe in the <code>orders</code> table. So on boot we <code>SELECT</code> all still-open orders and replay them into the in-memory book &mdash; now memory and disk agree before the first request lands. This is the reconciliation step that makes an in-memory engine safe to restart. The <code>defer c.Cleanup()</code> plus the signal catch is the mirror image: on the way <em>down</em>, we close the DB cleanly so WAL is checkpointed and nothing is half-written.
+</div>
+</div>
+<div class="chk"><code>go build .</code> from the project root produces the <code>crypto-exchange</code> binary. <strong>The entire backend is now written.</strong></div>
+
+<!-- ==================== CHAPTER 22 ==================== -->
+<h2 id="c22">Chapter 22 &mdash; Run it, prove it, load it</h2>
+<div class="why">
+Code you can't run is a guess. This last chapter turns the binary into a live exchange you can hit, and shows how to prove the money rules and push throughput.
+</div>
+<div class="step">
+<span class="step-tag">STEP 22.1</span> Build &amp; run.
+<pre><code># from the project root (where go.mod lives)
+go mod tidy          # resolve every dependency you added chapter by chapter
+go build -o exchange .
+./exchange           # boots on :3000, seeds users/balances, starts schedulers</code></pre>
+</div>
+<div class="step">
+<span class="step-tag">STEP 22.2</span> Exercise the full workflow with plain HTTP.
+<pre><code>BASE=http://localhost:3000/api/v1
+# 1. register + login -> token
+curl -s -XPOST $BASE/users/register -d '{"username":"alice","password":"pw"}'
+TOKEN=$(curl -s -XPOST $BASE/users/login -d '{"username":"alice","password":"pw"}' | jq -r .data)
+# 2. place a limit buy (freeze -> match -> settle, Chapter 11)
+curl -s -XPOST $BASE/orders/BTC-USDT -H "Authorization: $TOKEN" \
+     -d '{"side":"BID","type":"LIMIT","price":65000,"size":0.01}'
+# 3. see balances move available->locked, then settle
+curl -s $BASE/balances -H "Authorization: $TOKEN"
+# 4. read the public book (no token)
+curl -s $BASE/orderbooks/BTC-USDT/snapshot</code></pre>
+</div>
+<div class="step">
+<span class="step-tag">STEP 22.3</span> Prove conservation of money.
+<div class="why">The one test that matters for an exchange: total funds before == total funds after a flurry of trades. Sum every user's <code>available + locked</code> across all assets, run N random orders, sum again. If the numbers differ by a cent, a settlement path is wrong. This invariant is why we built two-phase placement inside <code>WithTx</code> (Chapters 10&ndash;11) &mdash; here's where you cash that in.</div>
+</div>
+<div class="step">
+<span class="step-tag">STEP 22.4</span> Push throughput &mdash; and know the ceiling.
+<div class="why">
+The matching engine (pure memory, Chapters 4&ndash;6) does ~1M ops/sec. But <em>end-to-end</em> each order also commits to SQLite, and SQLite is a single writer &mdash; so real throughput lands around <strong>~500&ndash;630 orders/sec</strong> on a good machine, no matter how many CPU cores you throw at it (the backend pegs exactly one core on the write path). We proved this: swapping the SQLite driver made it slower; adding a connection pool made it slower (write-lock contention); an 18-core box matched an 8-core one. The honest conclusion &mdash; and the real engineering lesson &mdash; is that <em>your bottleneck is the durable writer, not the algorithm</em>. To go faster you'd batch commits, shard the DB, or move to a write-ahead log service &mdash; a different project. For a self-contained, restart-safe demo, the single-file SQLite ceiling is the right trade.
+</div>
+<p>A tiny load generator is just the STEP 22.2 loop fired concurrently from many goroutines &mdash; place all-taker orders around a moving reference price and count completions per second. Watch it live on the front-end's orders/sec badge.</p>
+</div>
+<div class="chk">
+You started with an empty folder and a <code>go mod init</code>. Following each chapter in order &mdash; utils &rarr; model &rarr; engine &rarr; DTOs &rarr; DB &rarr; repos &rarr; transactions &rarr; services &rarr; security &rarr; middleware &rarr; controllers &rarr; router &rarr; OHLCV &rarr; WebSocket &rarr; schedulers &rarr; AMM &rarr; container &rarr; main &mdash; you built a complete, restart-safe, real-time crypto exchange backend, and you understand <em>why</em> every folder, every import, and every lock is there. That "why" is the difference between copying code and being a developer.
+</div>
+
+<div style="text-align:center; margin:48px 0 12px; opacity:0.7; font-size:0.9em;">
+&mdash; end of runbook &mdash; build order is the chapter order; each chapter compiles on its own.
+</div>
+
+</div>
+</body>
+</html>
