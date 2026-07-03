@@ -90,7 +90,7 @@ func startSim(w http.ResponseWriter, r *http.Request) {
 		err := exec.Command("systemd-run", "--unit="+unit(i), "--collect",
 			"-p", "Restart=always", "-p", "RestartSec=1",
 			"/app/loadtest", "-base", apiBase, "-market", "BTC-USDT",
-			"-token", tok, "-n", "100000000", "-c", "20", "-mid", "65000", "-mktpct", "20", "-band", "8").Run()
+			"-token", tok, "-n", "100000000", "-c", "20", "-mid", "65000", "-mktpct", "20", "-band", "25").Run()
 		if err == nil {
 			started++
 		}

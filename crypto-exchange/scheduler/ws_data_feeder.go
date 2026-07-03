@@ -43,23 +43,30 @@ func NewWSDataFeederJob(
 
 func (W *WSDataFeederJob) Start() error {
 	log.Infof("[WSDataFeederJob] start to feeding data to ws.")
+	// Main 1s loop: all channels + sim duration tick.
 	go func() {
-
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				utils.SimTick() // advance sim duration every second (independent of subscribers)
-				keys := W.wsHub.GetSubscriptionKeys()
-				for _, key := range keys {
+		for range ticker.C {
+			utils.SimTick() // advance sim duration every second (independent of subscribers)
+			for _, key := range W.wsHub.GetSubscriptionKeys() {
+				go W.collectAndSend(key)
+			}
+		}
+	}()
+	// Fast loop (400ms) for the order book only, so price movement looks smooth/heavy.
+	// Kept separate from the 1s loop to avoid multiplying the DB-heavy user_data queries.
+	go func() {
+		ticker := time.NewTicker(400 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			for _, key := range W.wsHub.GetSubscriptionKeys() {
+				if key.Channel == ws.ORDERBOOK {
 					go W.collectAndSend(key)
 				}
 			}
 		}
-
 	}()
-
 	return nil
 }
 
