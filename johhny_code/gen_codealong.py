@@ -206,6 +206,25 @@ AUTHORED = {
     "security/credential.go::CredentialCache.Get": "Read-hot path: hit the in-memory map first; only on a miss (e.g. after a restart) rebuild the user from the persisted token. That rebuild is why sessions survive a deploy.",
 }
 
+# Per-file "why this file exists" and extra per-piece notes are loaded from a
+# JSON file (authored by reading every file, so nothing here is guessed).
+FILE_WHY = {}
+NOTES_PATH = os.path.join(os.path.dirname(OUT), "file_notes.json")
+if os.path.exists(NOTES_PATH):
+    import json
+    for o in json.load(open(NOTES_PATH, encoding="utf-8")):
+        if o.get("why"):
+            FILE_WHY[o["path"]] = o["why"]
+        for kp in (o.get("key_pieces") or []):
+            AUTHORED.setdefault("%s::%s" % (o["path"], kp["name"]), kp["note"])
+
+# Match a piece note by the final identifier (method/func name), so a note keyed
+# "Apply" or "CacheKeyPrefix.Apply" both resolve for the Apply method.
+KP_BY_IDENT = {}
+for key, note in AUTHORED.items():
+    path, name = key.split("::", 1)
+    KP_BY_IDENT.setdefault((path, name.split(".")[-1]), note)
+
 def file_block(relpath, note=""):
     full = os.path.join(SRC, relpath)
     with open(full, "r", encoding="utf-8") as f:
@@ -216,8 +235,9 @@ def file_block(relpath, note=""):
     segs = split_go(body)
     parts = ["<div class=\"filecard\">"]
     parts.append('<div class="file-path">%s <span class="lc">%d lines &middot; built in %d pieces</span></div>' % (esc(relpath), n, len(segs)))
-    if note:
-        parts.append('<p class="filenote">%s</p>' % note)
+    why = FILE_WHY.get(relpath) or note
+    if why:
+        parts.append('<div class="filewhy">%s</div>' % why)
     parts.append('<p class="buildnote">We grow this file the way a developer does &mdash; one declaration at a time. Type each piece in order; together they <em>are</em> the complete file.</p>')
     piece = 0
     for kind, lines in segs:
@@ -232,9 +252,9 @@ def file_block(relpath, note=""):
             k, name = label_for(lines)
             title = "Add %s%s" % (KINDWORD.get(k, "the next piece"), (" <code>%s</code>" % esc(name)) if name else "")
             parts.append('<div class="piece"><div class="piece-h"><span class="pn">%d</span> %s</div>' % (piece, title))
-            akey = "%s::%s" % (relpath, name)
-            if akey in AUTHORED:
-                parts.append('<p class="pnote">%s</p>' % AUTHORED[akey])
+            pnote = KP_BY_IDENT.get((relpath, name.split(".")[-1])) if name else None
+            if pnote:
+                parts.append('<p class="pnote">%s</p>' % pnote)
             parts.append('<pre><code>%s</code></pre>' % esc(code))
             parts.append('</div>')
     parts.append('</div>')
@@ -462,6 +482,8 @@ pre.full{max-height:none}
 .file-path{font-family:"SF Mono",Consolas,monospace;font-size:.9em;font-weight:700;color:#fff;background:#11161d;border-bottom:1px solid var(--line);border-radius:10px 10px 0 0;padding:9px 14px}
 .file-path .lc{float:right;font-weight:400;color:var(--mut);font-size:.85em}
 .filenote{padding:2px 14px 0;color:var(--mut);font-style:italic}
+.filewhy{margin:10px 14px 2px;padding:10px 14px;background:rgba(210,153,34,.09);border-left:4px solid var(--warn);border-radius:0 8px 8px 0;font-size:.95em}
+.filewhy::before{content:"WHY THIS FILE EXISTS";display:block;font-size:.68em;letter-spacing:.11em;color:var(--warn);font-weight:700;margin-bottom:4px}
 .imphdr{padding:6px 14px 0;margin:.4em 0 .1em;font-weight:600;color:var(--accent)}
 p.noimp{padding:8px 14px;color:var(--mut)}
 ul.imp{margin:.2em 0 .4em;padding:0 14px 0 34px}
