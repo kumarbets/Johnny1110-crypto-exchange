@@ -610,7 +610,7 @@ func (mgr *MarketManager) GetAssets(market string) (string, string, error) {
 <div class="why">A fast order book is really three cooperating structures: a <strong>deque</strong> per price level (O(1) FIFO for price-time priority), a <strong>book side</strong> (a sorted map of price&rarr;deque, so best price is O(log n)), and an <strong>order index</strong> (a hash map order-id&rarr;node, so cancel is O(1)). We build them bottom-up before the book that combines them.</div>
 <div class="filecard">
 <div class="file-path">engine-v2/util/deque.go <span class="lc">143 lines &middot; built in 12 pieces</span></div>
-<div class="filewhy">An intrusive doubly-linked-list deque of OrderNodes giving O(1) push/pop/remove and running volume. It exists to provide FIFO time-priority within a price level with O(1) middle removal (for cancels). Without it price levels couldn't maintain order queues with fast arbitrary removal.</div>
+<div class="filewhy">An intrusive doubly-linked-list deque of OrderNodes giving O(1) push/pop/remove and a running volume. It exists to hold all orders at ONE price level in first-in-first-out order — which is exactly price-time priority: at the same price, whoever arrived earlier is filled first. Each method maps to a specific order-book action (rest a maker, fill a taker, cancel). Without it a price level couldn't queue orders fairly with fast arbitrary removal. Note it tracks two different numbers: <code>size</code> = count of orders, <code>volume</code> = sum of their remaining quantities.</div>
 <p class="buildnote">We grow this file the way a developer does &mdash; one declaration at a time. Type each piece in order; together they <em>are</em> the complete file.</p>
 <div class="piece"><div class="piece-h"><span class="pn">1</span> Start the file &mdash; <code>package</code> &amp; imports</div>
 <pre><code>package util
@@ -646,6 +646,7 @@ func NewOrderNodeDeque() *OrderNodeDeque {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">4</span> Add the method <code>OrderNodeDeque.PushBack</code></div>
+<p class="pnote">Rests a NEW maker order at the BACK of the queue (newest last). Back-insertion is what enforces time priority — earlier orders sit nearer the front and fill first. O(1).</p>
 <pre><code>
 // PushBack adds a node to the end of the deque in O(1) time.
 func (dq *OrderNodeDeque) PushBack(node *model.OrderNode) {
@@ -663,6 +664,7 @@ func (dq *OrderNodeDeque) PushBack(node *model.OrderNode) {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">5</span> Add the method <code>OrderNodeDeque.PushHead</code></div>
+<p class="pnote">Inserts at the FRONT. Used to return a partially-filled order to the head so it KEEPS its original early time priority instead of losing its place to the back.</p>
 <pre><code>
 // PushHead adds a node to the head of the deque in O(1) time.
 func (dq *OrderNodeDeque) PushHead(node *model.OrderNode) {
@@ -680,6 +682,7 @@ func (dq *OrderNodeDeque) PushHead(node *model.OrderNode) {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">6</span> Add the method <code>OrderNodeDeque.PopFront</code></div>
+<p class="pnote">Removes and returns the OLDEST order. Matching eats liquidity front-to-back, so PopFront is how a fully-filled maker leaves the level. O(1).</p>
 <pre><code>
 // PopFront removes and returns the node at the front of the deque in O(1) time.
 // Returns nil and an error if the deque is empty.
@@ -706,6 +709,7 @@ func (dq *OrderNodeDeque) PopFront() (*model.OrderNode, error) {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">7</span> Add the method <code>OrderNodeDeque.PeekFront</code></div>
+<p class="pnote">Looks at the oldest order WITHOUT removing it — the matcher peeks to test the price-cross and compute the fill before deciding to pop it or just reduce its remaining size.</p>
 <pre><code>
 // PeekFront returns the node at the front without removing it.
 // Returns nil if the deque is empty.
@@ -714,7 +718,7 @@ func (dq *OrderNodeDeque) PeekFront() *model.OrderNode {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">8</span> Add the method <code>OrderNodeDeque.Remove</code></div>
-<p class="pnote">O(1) removal of any node via its embedded pointers — the reason cancels are cheap.</p>
+<p class="pnote">O(1) delete of ANY node (head, tail, or middle) via its embedded prev/next pointers — this is what makes cancelling an order cheap, with no scan of the queue.</p>
 <pre><code>
 // Remove removes a specific node from the deque in O(1) time.
 // Returns an error if the node is nil or deque is empty.
@@ -753,6 +757,7 @@ func (dq *OrderNodeDeque) Remove(node *model.OrderNode) error {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">9</span> Add the method <code>OrderNodeDeque.IsEmpty</code></div>
+<p class="pnote">Lets the book side detect an exhausted price level so it can drop the whole level from the price tree.</p>
 <pre><code>
 // IsEmpty returns true if the deque has no elements.
 func (d *OrderNodeDeque) IsEmpty() bool {
@@ -760,6 +765,7 @@ func (d *OrderNodeDeque) IsEmpty() bool {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">10</span> Add the method <code>OrderNodeDeque.Size</code></div>
+<p class="pnote">O(1) count of orders at this level (kept as a running counter, never recomputed).</p>
 <pre><code>
 // Size returns the number of elements in the deque.
 func (d *OrderNodeDeque) Size() int {
@@ -767,6 +773,7 @@ func (d *OrderNodeDeque) Size() int {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">11</span> Add the method <code>OrderNodeDeque.Volume</code></div>
+<p class="pnote">O(1) total remaining quantity resting at this level — the number shown as market depth and consumed during matching.</p>
 <pre><code>
 // Volume returns the number of elements in the deque.
 func (d *OrderNodeDeque) Volume() float64 {
@@ -774,6 +781,7 @@ func (d *OrderNodeDeque) Volume() float64 {
 }</code></pre>
 </div>
 <div class="piece"><div class="piece-h"><span class="pn">12</span> Add the method <code>OrderNodeDeque.QuoteAmount</code></div>
+<p class="pnote">price &times; volume = the notional value (in quote currency) resting at this level, used by market-buy-by-quote-amount math.</p>
 <pre><code>
 // QuoteAmount returns the quoteAmt(price * allVolume).
 func (d *OrderNodeDeque) QuoteAmount() float64 {
