@@ -249,6 +249,19 @@
   <li><a href="#d7">D.7 &mdash; Hosting the whole stack on one VM</a></li>
   <li><a href="#d8">D.8 &mdash; Live system metrics, 1m candles, a DB viewer &amp; the load fleet</a></li>
 </ol>
+<strong>Part E &mdash; Deep dive: every concept, explained from zero</strong>
+<ol start="45">
+  <li><a href="#e1">E.1 &mdash; What a crypto exchange actually is (plain-English glossary)</a></li>
+  <li><a href="#e2">E.2 &mdash; The order book as a living data structure</a></li>
+  <li><a href="#e3">E.3 &mdash; Matching, tick by tick (a fully worked example)</a></li>
+  <li><a href="#e4">E.4 &mdash; Maker vs taker, liquidity, spread &amp; fees &mdash; why they exist</a></li>
+  <li><a href="#e5">E.5 &mdash; The money model: freeze &rarr; match &rarr; settle (with balances)</a></li>
+  <li><a href="#e6">E.6 &mdash; Concurrency for beginners: what breaks, and how Go fixes it</a></li>
+  <li><a href="#e7">E.7 &mdash; Why THESE data structures (map, tree, linked list)</a></li>
+  <li><a href="#e8">E.8 &mdash; Persistence &amp; crash recovery (why the book is rebuilt on boot)</a></li>
+  <li><a href="#e9">E.9 &mdash; Real-time delivery: snapshots, push vs poll, WebSocket</a></li>
+  <li><a href="#e10">E.10 &mdash; How the whole thing fits together (one big mental model)</a></li>
+</ol>
 </details>
 
 <!-- ============================================================ -->
@@ -1689,6 +1702,165 @@ func AddTrades(n int64) { atomic.AddInt64(&amp;tradesTotal, n) }
 </ul>
 <div class="warn"><strong>Throughput reality &mdash; measured, not assumed.</strong> The in-memory engine benchmarks at ~1&ndash;2.7M orders/sec, but end-to-end (HTTP &rarr; match &rarr; SQLite persist &rarr; settle both sides) tops out around <strong>~400&ndash;630 orders/sec</strong>, and the backend process pegs a <em>single</em> CPU core while doing it. That is the tell: it is bound by SQLite's single-writer serialization plus the per-order settlement statements &mdash; <em>not</em> by CPU/RAM. We confirmed this doesn't move by (a) running on an 18-core/94&nbsp;GB NVMe box instead of an 8-core SSD (same ~500/s, one core pegged), and (b) swapping the pure-Go WASM driver for the transpiled-C <code>modernc</code> driver (no faster, some lock contention). Reaching thousands/sec is an <em>architectural</em> change &mdash; batch/async settlement, or a server database (Postgres) with real write concurrency &mdash; not a machine or a config knob. What the badge shows (~500 orders/sec, ~250 trades/sec, totals climbing by thousands every few seconds, a 5&ndash;7 level book churning) is genuinely that pipeline running flat out.</div>
 <div class="note"><strong>The running demo (single VM, all under systemd):</strong> <code>exg</code> (backend, <code>:8080</code> REST / <code>:8081</code> WS) &middot; <code>fe</code> (frontend SPA, <code>:80</code>) &middot; <code>dbviewer</code> (<code>:8090</code>) &middot; <code>simctl</code> (<code>:8091</code>) &middot; <code>gen1..gen5</code> (continuous mixed limit+market traffic across a price band). Open <code>http://&lt;VM&gt;/markets/BTC-USDT</code> and &mdash; even without logging in &mdash; watch the four-metric badge, the 1m chart, and the live multi-level order book; the Start/Stop/Reset buttons drive it all. Log in to also see your own orders/trades/balances, all over one WebSocket.</div>
+
+<!-- ============================================================ -->
+<!-- PART E  — deep dive from zero                                -->
+<!-- ============================================================ -->
+<h1 id="partE">Part E &mdash; Deep dive: every concept, explained from zero</h1>
+<p>This part assumes <strong>nothing</strong>. If the earlier parts moved too fast, start here. We build the mental model of an exchange one idea at a time, in plain English, and only then point at the Go code that implements it. Read it slowly; each section is a lego brick the next one clicks onto.</p>
+
+<h2 id="e1">E.1 &mdash; What a crypto exchange actually is</h2>
+<p>Strip away the buzzwords. A spot exchange is a <strong>place where people swap one asset for another at a price they agree on</strong> &mdash; e.g. give US-dollar-stablecoin (USDT) and receive Bitcoin (BTC). That's it. Everything else is machinery to do that <em>fairly, quickly and without losing anyone's money.</em></p>
+<p>The single most important object is the <strong>order</strong>: a request that says <em>"I want to buy/sell this much of X at (up to/at least) this price."</em> Two orders that agree on a price become a <strong>trade</strong>. The exchange's whole job is to store orders, find pairs that agree, execute the swap, and update everyone's balances.</p>
+<table>
+<tr><th>Word</th><th>Plain meaning</th><th>In this codebase</th></tr>
+<tr><td><strong>Market / pair</strong></td><td>What's being traded against what, e.g. BTC-USDT. The left is the <em>base</em> asset (BTC), the right is the <em>quote</em> asset (USDT) you pay with.</td><td><code>market.MarketInfo{Name, BaseAsset, QuoteAsset}</code>, the 12 pairs in <code>settings.ALL_MARKETS</code></td></tr>
+<tr><td><strong>Order</strong></td><td>An intent to buy or sell a quantity at a price.</td><td><code>model.Order</code> (engine) / <code>dto.Order</code> (API)</td></tr>
+<tr><td><strong>Bid</strong></td><td>A buy order. Bidders want to buy <em>low</em>.</td><td><code>Side = BID (0)</code></td></tr>
+<tr><td><strong>Ask (offer)</strong></td><td>A sell order. Askers want to sell <em>high</em>.</td><td><code>Side = ASK (1)</code></td></tr>
+<tr><td><strong>Order book</strong></td><td>The list of all resting (unmatched) orders, bids on one side, asks on the other, sorted by price.</td><td><code>book.OrderBook</code> with a <code>bidSide</code> and <code>askSide</code></td></tr>
+<tr><td><strong>Best bid / best ask</strong></td><td>The highest price anyone will buy at, and the lowest price anyone will sell at.</td><td><code>BookSide.BestPrice()</code></td></tr>
+<tr><td><strong>Spread</strong></td><td>The gap between best ask and best bid. A tight spread = a healthy, liquid market.</td><td>derived: <code>best_ask_price - best_bid_price</code> in the snapshot</td></tr>
+<tr><td><strong>Trade / fill</strong></td><td>What happens when a buy and a sell agree: quantity changes hands at a price.</td><td><code>book.Trade</code>, produced by <code>executeMatch</code></td></tr>
+<tr><td><strong>Balance</strong></td><td>How much of each asset a user owns. Split into <em>available</em> (spendable) and <em>locked</em> (reserved for open orders).</td><td><code>dto.Balance{Available, Locked}</code>, table <code>balances</code></td></tr>
+<tr><td><strong>Settlement</strong></td><td>Actually moving the balances after a trade: debit one asset, credit the other, take a fee.</td><td><code>serviceHelper.ProcessTradeSettlement</code></td></tr>
+<tr><td><strong>Fee</strong></td><td>The exchange's cut of each trade, a small % of the traded value.</td><td><code>maker_fee</code> / <code>taker_fee</code> on the user</td></tr>
+</table>
+<div class="note"><strong>Keep this picture in your head:</strong> the exchange is a matchmaker holding a sorted list of "want to buy" and "want to sell" notes. When a new note can be satisfied by notes on the other pile, it pairs them off, swaps the money, and keeps the leftovers on the pile. The rest of Part&nbsp;E is just "how do you keep that list sorted, pair fairly, and not lose money while thousands of notes arrive per second."</div>
+
+<h2 id="e2">E.2 &mdash; The order book as a living data structure</h2>
+<p>Picture two ladders standing back to back. The <strong>ask ladder</strong> lists sell orders, cheapest at the bottom. The <strong>bid ladder</strong> lists buy orders, most expensive at the top. The bottom of the ask ladder and the top of the bid ladder face each other &mdash; that gap is the spread.</p>
+<div class="diagram"><pre>
+        ASK ladder (sellers)              a market is "the two ladders"
+   65 300  ×2.0  ┐ higher = further out
+   65 100  ×0.5  │
+   65 020  ×0.5  ┘ best ask (cheapest sell)   ── spread ──┐
+   ....................................................... │  (best ask − best bid)
+   64 800  ×0.6  ┐ best bid (dearest buy)     ────────────┘
+   64 700  ×0.5  │
+   64 500  ×1.2  ┘ lower = further out
+        BID ladder (buyers)
+</pre></div>
+<p>At every <em>rung</em> (a price level) there can be many orders. They wait in line: the one that arrived <strong>first</strong> gets filled first. So the book is really <em>a sorted set of price rungs, and at each rung a queue of orders</em>. Two rules of fairness fall out of this shape:</p>
+<ul>
+  <li><strong>Price priority:</strong> a better price is always served first (a buyer offering more, a seller asking less).</li>
+  <li><strong>Time priority:</strong> at the <em>same</em> price, whoever queued earlier is served first. First-come, first-served.</li>
+</ul>
+<p>These two rules are called <strong>price&ndash;time priority</strong> and they are the fairness contract of almost every real exchange. The whole reason the code uses the data structures it does (a sorted tree of rungs, a FIFO queue at each rung) is to honour these two rules while staying fast &mdash; explained concretely in <a href="#e7">E.7</a>.</p>
+<pre><code>// the shape, in the code:
+OrderBook
+ ├── bidSide  : BookSide   // a sorted map  price -> queue-of-orders
+ ├── askSide  : BookSide   // a sorted map  price -> queue-of-orders
+ └── orderIndex: map[orderID] -> where it sits   // so cancel is instant
+</code></pre>
+
+<h2 id="e3">E.3 &mdash; Matching, tick by tick (a fully worked example)</h2>
+<p>Let's run the machine by hand. Start with this ask ladder resting in the book (nothing has traded yet):</p>
+<div class="diagram"><pre>
+ASK ladder                    BID ladder
+  65 020  ×0.3  (order A, oldest)   64 800 ×0.6
+  65 020  ×0.2  (order B, newer)
+  65 100  ×0.4  (order C)
+</pre></div>
+<p>Now a new order arrives: <strong>BUY 0.7 BTC at 65 020, aggressive (taker)</strong>. Watch the engine (<code>takeLimitOrder</code>) walk the loop:</p>
+<table>
+<tr><th>Step</th><th>Check</th><th>Action</th><th>Book after</th></tr>
+<tr><td>1</td><td>Best ask = 65 020. Does 65 020 &le; my buy limit 65 020? <strong>Yes</strong> &rarr; it crosses.</td><td>Pop the <em>oldest</em> order at 65 020 (order&nbsp;A, ×0.3). Trade <code>min(0.7, 0.3)=0.3</code> @ 65 020. My remaining: 0.4.</td><td>A gone; B ×0.2 now best</td></tr>
+<tr><td>2</td><td>Best ask still 65 020 (order B). Crosses again.</td><td>Trade <code>min(0.4, 0.2)=0.2</code> @ 65 020. My remaining: 0.2. The 65 020 rung is now empty &rarr; removed.</td><td>C ×0.4 @ 65 100 now best</td></tr>
+<tr><td>3</td><td>Best ask = 65 100. Is 65 100 &le; my limit 65 020? <strong>No.</strong></td><td>Stop matching. I still have 0.2 unfilled.</td><td>&mdash;</td></tr>
+<tr><td>4</td><td>Leftover 0.2 &gt; 0.</td><td>My remaining 0.2 <em>becomes a resting bid</em> at 65 020 (I'm now a maker for that part).</td><td>new best bid 65 020 ×0.2</td></tr>
+</table>
+<p>Outcome: <strong>two trades</strong> (0.3 and 0.2, both at 65 020), the latest price is now 65 020, and the book has a fresh best bid. Notice how the two fairness rules played out: cheaper asks first (price priority), and the older 65 020 order (A) before the newer one (B) (time priority).</p>
+<div class="note"><strong>Three flavours, one idea.</strong> A <strong>maker</strong> limit order skips the loop and just rests (it's adding liquidity, not taking it). A <strong>taker</strong> limit order runs the loop above. A <strong>market</strong> order is a taker with no price limit &mdash; it keeps eating the ladder until its quantity (or its budget of quote currency) is spent. All three live in <code>orderbook.go</code>: <code>makeLimitOrder</code>, <code>takeLimitOrder</code>, <code>takeMarket{Bid,Ask}Order</code>.</div>
+<div class="warn"><strong>A subtlety this project taught us the hard way (see the git history):</strong> the engine only matches <em>taker</em> orders. If you place a <em>maker</em> buy priced above a resting ask, the engine happily rests it &mdash; and now best bid &gt; best ask, a "crossed" (invalid) book. Real venues prevent this by treating any crossing order as a taker. Lesson: <em>a matching rule and the order-entry rule must agree, or the book can enter states that "can't happen".</em></div>
+
+<h2 id="e4">E.4 &mdash; Maker vs taker, liquidity, spread &amp; fees</h2>
+<p>Two orders meet, but they play different roles, and the exchange treats them differently on purpose.</p>
+<ul>
+  <li>A <strong>maker</strong> is the order that was <em>already resting</em> in the book. It <em>provided</em> liquidity &mdash; it was there waiting so someone else could trade instantly.</li>
+  <li>A <strong>taker</strong> is the order that <em>arrived and crossed</em>, consuming a resting order. It <em>took</em> liquidity.</li>
+</ul>
+<p><strong>Why the distinction earns its keep:</strong> a market is only useful if there's something to trade against. If nobody rests orders, every trader stares at an empty book. So exchanges <em>reward</em> makers (lower fee, sometimes a rebate) and <em>charge</em> takers a bit more &mdash; a gentle nudge to keep the book full. In this codebase you can see it on the seeded users: maker fee 0.1%, taker fee 0.2% (the taker pays double). Fees are captured <em>per side</em> on every <code>Trade</code> (<code>bid_fee_rate</code>, <code>ask_fee_rate</code>) so each party is billed its own rate.</p>
+<p><strong>Liquidity</strong> is just "how much is resting near the current price." A deep, liquid book means you can trade size without moving the price much; a thin book means a single market order jumps the price several rungs. That's exactly why this project ships an <strong>Automated Market Maker (AMM)</strong> bot (<code>service/impl/amm</code>): every few minutes it posts a ladder of maker orders around a reference price, so the demo book always has depth to trade against instead of being empty.</p>
+
+<h2 id="e5">E.5 &mdash; The money model: freeze &rarr; match &rarr; settle</h2>
+<p>This is where an exchange earns trust or loses it. The rule is simple to state and unforgiving to break: <strong>never let a user spend money they don't have, and never lose a cent in a trade.</strong> The code enforces it with a three-beat rhythm.</p>
+<p>Every balance is split into two buckets:</p>
+<ul>
+  <li><strong>available</strong> &mdash; money you can freely use.</li>
+  <li><strong>locked</strong> &mdash; money reserved against your open orders, so you can't double-spend it.</li>
+</ul>
+<h4>Beat 1 &mdash; Freeze (when the order is placed)</h4>
+<p>Before an order enters the book, the amount it <em>could</em> spend is moved <code>available &rarr; locked</code>. A buy of 0.5&nbsp;BTC at 65 000 locks 32 500&nbsp;USDT. If you don't have it, the freeze fails and the order is rejected &mdash; you can never place an order you can't afford.</p>
+<pre><code>balanceRepo.LockedByUserIdAndAsset(ctx, tx, userID, "USDT", 32500) // available -> locked</code></pre>
+<h4>Beat 2 &mdash; Match (in memory)</h4>
+<p>The engine produces trades (E.3). No money has moved yet &mdash; we only know <em>what</em> should move.</p>
+<h4>Beat 3 &mdash; Settle (apply the trades)</h4>
+<p>For each trade, the buyer's locked USDT is spent and they receive BTC; the seller's locked BTC is spent and they receive USDT; each pays their fee. Worked example, a 0.3&nbsp;BTC fill @ 65 000, taker buyer (0.2% fee), maker seller (0.1% fee):</p>
+<table>
+<tr><th></th><th>Buyer (taker)</th><th>Seller (maker)</th></tr>
+<tr><td>USDT</td><td>&minus;19 500 (0.3&times;65 000) from locked</td><td>+19 500 &minus; fee(0.1%)= +19 480.5</td></tr>
+<tr><td>BTC</td><td>+0.3 &minus; fee(0.2%)= +0.2994</td><td>&minus;0.3 from locked</td></tr>
+</table>
+<p>The exchange keeps the fees (0.0006&nbsp;BTC + 19.5&nbsp;USDT). Every number is a move between the same two buckets; nothing is created or destroyed except the fee that's explicitly taken. That's <strong>conservation of money</strong>, and it's why the placement writes are wrapped in a database transaction (<code>WithTx</code>): if any step fails, <em>all</em> of it rolls back &mdash; you never end up with a half-applied trade.</p>
+<div class="note"><strong>Why "two phases" (E in Part&nbsp;A/B)?</strong> Beat&nbsp;1&ndash;2 (freeze + match + record the trades) commit together as the "placement" phase; Beat&nbsp;3 (settlement) is a second phase. Splitting them names the two failure domains and keeps each step small enough to reason about. The honest cost &mdash; several DB commits per order &mdash; is exactly the throughput ceiling measured in Part&nbsp;D.</div>
+
+<h2 id="e6">E.6 &mdash; Concurrency for beginners: what breaks, and how Go fixes it</h2>
+<p>Thousands of orders arrive at once. The computer runs many of them <em>at the same time</em>. That's fast &mdash; and dangerous, because they touch shared data (the order book, a balance). Here is the danger, in slow motion.</p>
+<p><strong>The race:</strong> your balance is 100. Two withdrawals of 100 run simultaneously. Both read "100" (enough!), both subtract, both write "0". You withdrew 200 from a 100 balance. Nobody wrote a bug &mdash; the <em>interleaving</em> is the bug.</p>
+<p>Go gives three tools; this codebase uses all three, each for a specific job:</p>
+<table>
+<tr><th>Tool</th><th>One-line idea</th><th>The job it does here</th></tr>
+<tr><td><strong>goroutine</strong> (<code>go f()</code>)</td><td>run something concurrently, almost free.</td><td>the HTTP server, the WS server, the four schedulers, the OHLCV workers &mdash; all run at once.</td></tr>
+<tr><td><strong>mutex</strong> (<code>sync.Mutex</code>)</td><td>a lock: only one goroutine holds it at a time.</td><td>the order book takes <code>obMu.Lock()</code> for the whole of a match, so two orders can't interleave inside the book (kills the race above).</td></tr>
+<tr><td><strong>RWMutex</strong></td><td>many readers <em>or</em> one writer.</td><td>the engine's map of books: lots of reads (which book?), rare writes.</td></tr>
+<tr><td><strong>channel</strong> (<code>chan</code>)</td><td>a safe pipe to hand data between goroutines &mdash; "don't share memory, communicate."</td><td>the trade stream feeding the candlestick aggregator; each WS client's outbound queue.</td></tr>
+<tr><td><strong>atomic</strong></td><td>a counter that's safe to bump from many goroutines without a lock.</td><td>the system-wide orders/trades counters behind the live badge.</td></tr>
+</table>
+<div class="note"><strong>The golden rule you can carry everywhere:</strong> if two goroutines might touch the same data and at least one writes, you need a lock (or a channel, or an atomic). The order book's single big lock during a match looks "slow", but it's <em>correct</em> &mdash; and correctness of money beats cleverness. (It's also why the real ceiling is the single-writer database, not the lock: see Part&nbsp;D.)</div>
+
+<h2 id="e7">E.7 &mdash; Why THESE data structures</h2>
+<p>Every structure in the engine is chosen to make a specific operation cheap. "Cheap" is measured in <em>Big-O</em>: how the cost grows as the book gets huge. O(1) = constant (great), O(log n) = grows slowly (fine), O(n) = grows with the whole book (avoid on the hot path).</p>
+<table>
+<tr><th>Operation the engine must be fast at</th><th>Structure used</th><th>Cost</th><th>Why not the obvious alternative</th></tr>
+<tr><td>Find the <em>best</em> price instantly, keep prices sorted as orders come and go</td><td>a balanced tree (<code>gods</code> TreeMap), price &rarr; level</td><td>O(log n) insert/delete, O(1)-ish best</td><td>A plain array stays sorted only if you shift everything on each insert &mdash; O(n). A plain map isn't sorted at all, so finding the best price is O(n).</td></tr>
+<tr><td>Serve orders at one price first-come-first-served, add/remove at both ends</td><td>a doubly-linked list (deque) per price level</td><td>O(1) push/pop either end</td><td>An array queue needs shifting on pop-front &mdash; O(n) per fill, and fills are the hottest path.</td></tr>
+<tr><td>Cancel an order by its ID without scanning the book</td><td>a hash map <code>orderID &rarr; its node</code></td><td>O(1) lookup</td><td>Without it you'd search every price level for the ID &mdash; O(n). At 100k resting orders that's the difference between instant and a stall.</td></tr>
+</table>
+<p>Put together: a taker fill touches the best rung (tree, cheap), pops the front of that rung's queue (list, O(1)), and a cancel jumps straight to the order (map, O(1)). No operation on the hot path is O(n). <em>That</em> is how the README benchmark reaches ~1&ndash;2.7&nbsp;million orders/second in memory &mdash; not magic, just the right container for each job.</p>
+
+<h2 id="e8">E.8 &mdash; Persistence &amp; crash recovery</h2>
+<p>The order book lives in <strong>memory</strong> (RAM) because that's what makes it fast. But RAM is wiped when the process stops. So two questions: how do we not lose money on a crash, and how do we get the book back on restart?</p>
+<ul>
+  <li><strong>Money is safe because it's in the database, not (only) in RAM.</strong> Every order and trade and balance change is written to SQLite inside a transaction. If the process dies mid-flight, the transaction either fully committed or fully rolled back &mdash; never half. The in-memory book is a fast <em>index</em> over durable truth, not the truth itself.</li>
+  <li><strong>The book is rebuilt on boot.</strong> On startup, <code>recoverOrderBook</code> reads every order still marked <code>NEW</code> or <code>PARTIAL</code> from the DB and replays them into fresh empty books (<code>RecoverOrderBook</code>). Resting liquidity survives a restart even though the RAM structure didn't.</li>
+</ul>
+<p>Why SQLite (a single file) and not a big database server? Because the whole exchange is one binary and one file &mdash; trivial to run, and plenty fast <em>if</em> you tune it. That tuning (WAL journal, relaxed fsync) and its honest ceiling are Part&nbsp;D. The key idea to take away: <strong>keep the hot path in memory, keep the truth on disk, and be able to rebuild one from the other.</strong></p>
+
+<h2 id="e9">E.9 &mdash; Real-time delivery: snapshots, push vs poll, WebSocket</h2>
+<p>Traders need to <em>see</em> the book change live. Two ways to deliver that:</p>
+<ul>
+  <li><strong>Poll (pull):</strong> the browser asks "what's the book now?" every second over HTTP. Simple, but chatty and always a bit stale.</li>
+  <li><strong>Push (WebSocket):</strong> the browser opens one long-lived socket and the server <em>pushes</em> updates as they happen. Efficient and live.</li>
+</ul>
+<p>Two design choices make this cheap and safe:</p>
+<ol>
+  <li><strong>Serve a snapshot, not the live book.</strong> A scheduler copies the top-20 rungs into an immutable <code>BookSnapshot</code> every 300&nbsp;ms. Readers (REST and WebSocket) serve that copy, so reading never fights the matching engine for the lock (E.6). Cheap, bounded, and it can never expose a half-updated book.</li>
+  <li><strong>Public vs private channels.</strong> The order book, candles and market stats are the same for everyone &mdash; <em>public</em> channels. Your own orders, trades and balances are yours alone &mdash; a <em>private</em> channel keyed by your login token. Same socket, two visibility classes. (Getting this split right, and re-subscribing after a reconnect, were real bugs fixed in this working copy &mdash; see the git history.)</li>
+</ol>
+
+<h2 id="e10">E.10 &mdash; How the whole thing fits together</h2>
+<p>Here is the entire system as one sentence you can now unpack: <em>a request comes in over HTTP, is authenticated, becomes an order, freezes the user's funds, is matched in an in-memory book guarded by a lock, the resulting trades are persisted and settle the balances, and the changed book and your orders are pushed back out over a WebSocket &mdash; while background schedulers keep the book liquid, roll candlesticks, and refresh the snapshots.</em></p>
+<div class="diagram"><pre>
+ you ──HTTP──▶ controller ──▶ service ──freeze──▶ balances(DB)
+                                  │
+                                  ├─▶ MATCHING ENGINE (in RAM, locked)
+                                  │        └─ trades ─▶ persist(DB) ─▶ SETTLE balances(DB)
+                                  │                          └─▶ candlestick stream
+                                  ▼
+ you ◀─WebSocket── snapshot / your orders ◀── feeder ◀── (schedulers refresh, AMM quotes)
+</pre></div>
+<p>Every box in that diagram is a folder you can open (Part&nbsp;A.21 explains why they're split that way), every arrow is a function you can read (Part&nbsp;B builds them in order), and every design choice has a reason you now know (this Part&nbsp;E). If a piece ever feels like magic, it isn't &mdash; it's one of these ten ideas wearing a Go costume. Re-read the relevant section, find the folder, read the types, then the functions. That is how you understand <em>any</em> codebase, not just this one.</p>
 
 <p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents the changes made in this working copy &mdash; SQLite WAL tuning; a WebSocket-first data flow with a private <code>user_data</code> channel; system-level orders/trades counters; a 1-minute OHLCV interval; a read-only DB viewer; and the measured throughput behind them. License of the original project: non-commercial use only.</p>
 
