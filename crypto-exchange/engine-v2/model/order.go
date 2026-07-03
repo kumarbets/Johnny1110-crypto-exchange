@@ -125,8 +125,8 @@ type OrderNode struct {
 	Prev, Next *OrderNode
 }
 
-func NewOrderNode(orderId, userId string, side Side, price float64, size float64, quoteAmt float64, orderType Mode, feeRate float64) *OrderNode {
-	order := NewOrder(orderId, userId, side, price, size, quoteAmt, orderType, feeRate)
+func NewOrderNode(orderId, userId string, side Side, price float64, size float64, quoteAmt float64, mode Mode, feeRate float64) *OrderNode {
+	order := NewOrder(orderId, userId, side, price, size, quoteAmt, mode, feeRate)
 	return &OrderNode{
 		Order: order,
 	}
