@@ -400,12 +400,8 @@ export default {
     await this.fetchBalances()
     this.startAutoRefresh()
     this.simCheck()
-    // tick the "Duration" each second while running; periodically re-sync with the server
-    let simTick = 0
-    this.durationTimer = setInterval(() => {
-      if (this.simRunning) this.simDuration++
-      if (++simTick % 10 === 0) this.simCheck()
-    }, 1000)
+    // Duration is authoritative from the backend (accumulated running time); poll it each second.
+    this.durationTimer = setInterval(() => { this.simCheck() }, 1000)
     const baseAsset = 'ETH'; // Example dynamic data
     const quoteAsset = 'USD'; // Example dynamic data
     this.cmdOutputList.push(`C:\\CryptoEx> trading ${baseAsset}/${quoteAsset}
@@ -791,7 +787,8 @@ export default {
       return `http://${window.location.hostname}:8091/${path}`
     },
     async simStart() {
-      try { await fetch(this.simUrl('start'), { method: 'POST' }); this.simRunning = true; this.simDuration = 0 }
+      // do NOT reset duration here: it accumulates all running time (only Reset zeroes it)
+      try { await fetch(this.simUrl('start'), { method: 'POST' }); this.simRunning = true }
       catch (e) { console.error('sim start failed', e) }
     },
     async simStop() {
