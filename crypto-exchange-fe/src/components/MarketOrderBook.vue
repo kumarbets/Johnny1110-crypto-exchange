@@ -390,13 +390,13 @@ export default {
     this.baseAsset = assets[0]
     this.quoteAsset = assets[1]
 
-    await this.fetchOrderBook()
+    await this.fetchOrderBook()   // public: instant book before WS takes over
 
     this.limitPrice = this.latestPrice
 
-    await this.fetchOpenOrders()
-    await this.fetchClosedOrders()
-    await this.fetchBalances()
+    // open orders, trade history and balances now arrive over the WebSocket
+    // (private user_data channel) once connected — no authed REST calls on mount,
+    // so a stale token can't produce 401 noise here.
     this.startAutoRefresh()
     const baseAsset = 'ETH'; // Example dynamic data
     const quoteAsset = 'USD'; // Example dynamic data
