@@ -208,7 +208,7 @@
   <li><a href="#a17">A.17 &mdash; HTTP with Gin &amp; the third-party libraries used</a></li>
   <li><a href="#a18">A.18 &mdash; Tooling cheat-sheet + how to read Go fast</a></li>
   <li><a href="#a19">A.19 &mdash; Five more idioms you'll see (defer, context, blank import, ticker, embedding)</a></li>
-  <li><a href="#a20">A.20 &mdash; The four Go design patterns this codebase leans on</a></li>
+  <li><a href="#a20">A.20 &mdash; The design patterns this codebase leans on, and why (9 patterns + trade-offs)</a></li>
 </ol>
 <strong>Part B &mdash; Build the exchange backend</strong>
 <ol start="19">
@@ -544,37 +544,65 @@ func WithTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) error {
     return tx.Commit()
 }</code></pre>
 
-<h2 id="a20">A.20 &mdash; The four Go design patterns this codebase leans on</h2>
-<p>Recognising these four makes the whole codebase readable &mdash; they recur in almost every package.</p>
+<h2 id="a20">A.20 &mdash; The design patterns this codebase leans on, and <em>why</em></h2>
+<p>Patterns are not decoration &mdash; each one is a specific answer to a specific pain. For every pattern below: <strong>the problem</strong> it solves, <strong>the alternative</strong> it was chosen over, and <strong>the payoff</strong> here. Recognise these and the whole codebase reads as a set of deliberate decisions rather than arbitrary structure.</p>
 
-<h3>1. Constructor returns an interface</h3>
-<p>Every layer exposes a <code>New&hellip;</code> function that returns an <em>interface</em>, hiding the concrete struct. Callers depend on the contract, never the implementation &mdash; that is what makes the layers swappable and testable.</p>
+<h3>1. Constructor returns an <em>interface</em> (dependency inversion)</h3>
+<p><strong>Problem:</strong> if the order service holds a <code>*sqliteOrderRepository</code>, then the service is welded to SQLite &mdash; you cannot unit-test it without a real database, and swapping storage means editing the service.<br>
+<strong>Alternative rejected:</strong> return the concrete struct and let callers reach into its fields.<br>
+<strong>Payoff:</strong> every <code>New&hellip;</code> returns an interface, so a caller depends on <em>what a collaborator does</em>, not <em>how</em>. In a money system this is the difference between a testable, layer-isolated design and a monolith. It is exactly why the whole app can be wired from one container and why a repository could become Postgres without the service noticing.</p>
 <pre><code>func NewIOrderService(db *sql.DB, engine *core.MatchingEngine, /* repos&hellip; */) service.IOrderService {
-    return &amp;orderService{ db: db, engine: engine, /* &hellip; */ }   // returns the INTERFACE
+    return &amp;orderService{ db: db, engine: engine, /* &hellip; */ }   // returns the INTERFACE, hides the struct
 }</code></pre>
 
-<h3>2. Builder (fluent construction)</h3>
-<p>A DTO with many fields is assembled step-by-step with chained methods, ending in <code>Build()</code>. Reads like a sentence and avoids a 12-argument constructor. Used for orders.</p>
-<pre><code>order := dto.NewOrderBuilder().
-    Market("BTC-USDT").User(userID).Side(model.BID).
-    Price(65000).Size(0.5).Mode(model.MAKER).
-    Build()</code></pre>
+<h3>2. Repository (persistence behind an interface)</h3>
+<p><strong>Problem:</strong> SQL scattered through business logic couples money rules to table shapes, and makes "freeze this balance" impossible to read.<br>
+<strong>Alternative rejected:</strong> an ORM &mdash; which hides the exact SQL an exchange needs to reason about (locking, atomic balance moves) and adds a heavy abstraction.<br>
+<strong>Payoff:</strong> repositories expose <em>domain verbs</em> &mdash; <code>LockedByUserIdAndAsset</code>, <code>UnlockedByUserIdAndAsset</code>, <code>BatchInsert(trades)</code> &mdash; with hand-written SQL underneath. The service reads like the business rule; the SQL stays inspectable. The <code>DBExecutor</code> twist (an interface satisfied by both <code>*sql.DB</code> and <code>*sql.Tx</code>) means the same repo method runs inside or outside a transaction &mdash; no duplicated "Tx" variants.</p>
 
-<h3>3. Strategy (behaviour chosen at runtime)</h3>
-<p>Instead of a big <code>if orderType == LIMIT &hellip; else &hellip;</code>, the service picks a <em>strategy object</em> that knows how to place that kind of order. Adding a new order type means adding a struct, not editing a switch.</p>
-<pre><code>type OrderPlacementStrategy interface {
-    Execute(ctx, service, orderCtx) error
-}
-// LimitOrderStrategy and MarketOrderStrategy each implement Execute();
+<h3>3. Strategy (choose behaviour at runtime, keep it open for extension)</h3>
+<p><strong>Problem:</strong> placing a LIMIT order and a MARKET order share a skeleton but differ in the middle. A single function with <code>if orderType == LIMIT &hellip; else &hellip;</code> grows a new branch every time a type is added, and every edit risks the others.<br>
+<strong>Alternative rejected:</strong> the big switch.<br>
+<strong>Payoff:</strong> each order type is its own <code>OrderPlacementStrategy</code> object. Adding a "stop" order later means <em>adding a struct</em>, not surgery on a working, money-critical function (open/closed principle). The service picks the strategy once and delegates.</p>
+<pre><code>type OrderPlacementStrategy interface { Execute(ctx, service, orderCtx) error }
+// LimitOrderStrategy / MarketOrderStrategy implement Execute();
 // getOrderPlacementStrategy(req) returns the right one.</code></pre>
 
-<h3>4. Closure callback (a function is a first-class value)</h3>
-<p>The transaction helper takes <em>your code</em> as a function argument and runs it inside a begin/commit/rollback envelope. You never write transaction boilerplate again &mdash; the pattern owns commit-on-success, rollback-on-error.</p>
-<pre><code>WithTx(ctx, s.db, func(tx *sql.Tx) error {   // &lt;-- a function passed as data
+<h3>4. Builder (fluent construction of a wide object)</h3>
+<p><strong>Problem:</strong> an order DTO has ~15 fields; a positional constructor <code>NewOrder(a,b,c,d,e,f,g,&hellip;)</code> is unreadable and easy to mis-order (swap <code>price</code> and <code>size</code> &mdash; a money bug the compiler won't catch).<br>
+<strong>Alternative rejected:</strong> the giant constructor, or a mutable struct filled field-by-field with no validation point.<br>
+<strong>Payoff:</strong> a chain that reads like a sentence, with one place (<code>Build()</code>) to validate/normalise before the object escapes.</p>
+<pre><code>order := dto.NewOrderBuilder().
+    Market("BTC-USDT").User(userID).Side(model.BID).
+    Price(65000).Size(0.5).Mode(model.MAKER).Build()</code></pre>
+
+<h3>5. Closure callback / template method (own the boilerplate, inject the difference)</h3>
+<p><strong>Problem:</strong> every write path needs the identical <code>begin &rarr; work &rarr; commit-or-rollback</code> dance. Copy-pasting it means one forgotten <code>Rollback</code> leaks a transaction and corrupts balances.<br>
+<strong>Alternative rejected:</strong> hand-rolled begin/commit at each call site.<br>
+<strong>Payoff:</strong> <code>WithTx</code> owns the envelope and takes <em>your code as a function</em>. The invariant (rollback on any error or panic, commit only on clean return) is written once and cannot be forgotten. This is Go's answer to the template-method pattern &mdash; the fixed skeleton lives in the helper, the variable step is the closure you pass in.</p>
+<pre><code>WithTx(ctx, s.db, func(tx *sql.Tx) error {   // a function passed as data
     // &hellip; all your writes here &hellip;
     return nil                                // nil => commit; non-nil => rollback
 })</code></pre>
-<p>(A fifth, the <strong>Facade</strong>, you already met: <code>MatchingEngine</code> is a thin front over many <code>OrderBook</code>s, giving the rest of the app one simple door to knock on.)</p>
+
+<h3>6. Facade (one simple door over a complex subsystem)</h3>
+<p><strong>Problem:</strong> the rest of the app should not juggle twelve <code>OrderBook</code>s, their locks, and per-market routing.<br>
+<strong>Payoff:</strong> <code>MatchingEngine</code> is a thin front &mdash; <code>PlaceOrder(market, &hellip;)</code>, <code>CancelOrder</code>, <code>Snapshot</code>, <code>Reset</code> &mdash; that hides book lookup and locking. Callers knock on one door; the complexity stays behind it. Same idea, smaller scale: the <code>container</code> is a facade over object construction.</p>
+
+<h3>7. Dependency-Injection container (construction in one place)</h3>
+<p><strong>Problem:</strong> if every package <code>new()</code>s its own dependencies, wiring is smeared across the codebase, lifetimes are unclear, and two components accidentally get two different "singletons".<br>
+<strong>Alternative rejected:</strong> global variables / package-level singletons, or ad-hoc construction at each use site.<br>
+<strong>Payoff:</strong> <code>container.NewContainer</code> builds every repo, service, scheduler and the engine <em>once</em>, in dependency order, and hands each collaborator exactly what it needs (as interfaces). The wiring diagram <em>is</em> the container. Swapping an implementation, or seeing what depends on what, is a single file &mdash; not a hunt.</p>
+
+<h3>8. Snapshot / read-model cache (separate the hot write path from reads)</h3>
+<p><strong>Problem:</strong> the order book mutates on every trade under a lock; if every HTTP request or WS push walked the live book, reads would contend with matching and slow the engine.<br>
+<strong>Payoff:</strong> a scheduler refreshes a cached top-20 <code>BookSnapshot</code> every 300&nbsp;ms; reads (REST snapshot, the WS <code>orderbook</code> channel) serve that immutable copy and never touch the matching hot path. Likewise 24h market stats are computed on a timer and cached, not recomputed per request. This is a lightweight read-model / CQRS split: writers optimise for correctness, readers for cheapness.</p>
+
+<h3>9. Two-phase placement + settlement (make failure legible)</h3>
+<p><strong>Problem:</strong> an order both mutates in-memory engine state <em>and</em> must persist balances/trades; doing all of it in one blob makes partial failure impossible to reason about.<br>
+<strong>Payoff:</strong> phase&nbsp;1 (freeze, insert, match, record trades) commits atomically; phase&nbsp;2 settles balances and fees for the resulting trades. Splitting them names the two failure domains explicitly and keeps each step small. (The measured throughput trade-off of this split &mdash; many small commits per order &mdash; is discussed honestly in Part&nbsp;D.)</p>
+
+<div class="note"><strong>The through-line:</strong> almost every pattern here exists to <em>isolate change</em> &mdash; new storage, new order type, new failure mode &mdash; behind an interface or a small object, so that a money-critical, always-on system can evolve without editing the parts that already work.</div>
 
 <!-- ============================================================ -->
 <!-- PART B                                                       -->
