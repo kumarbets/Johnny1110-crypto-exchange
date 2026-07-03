@@ -30,14 +30,11 @@ func main() {
 	client := &http.Client{Timeout: 10 * time.Second}
 	var wg sync.WaitGroup
 
-	// Shared moving target: every generator computes the SAME price wave from the wall
-	// clock, so they all push the book toward it together -> the price genuinely trends
-	// up and down in visible waves (anchoring to the live price just mean-reverts and
-	// barely moves). wave(t) = mid + big slow wave + smaller faster ripple.
-	waveAt := func() float64 {
-		t := float64(time.Now().UnixNano()) / 1e9
-		return *mid + 400*math.Sin(t/12.0) + 120*math.Sin(t/3.3)
-	}
+	// Price is driven by a shared time-based wave (every generator computes the same value
+	// from the wall clock). Critically, the order side is biased toward the wave's SLOPE:
+	// when the wave rises we favor aggressive buys, when it falls we favor sells. That
+	// directional pressure (a) trends the price via real trades and (b) consumes the
+	// lagging side so no stale maker orders are left behind to cross the book.
 
 	worker := func() {
 		defer wg.Done()
@@ -46,8 +43,20 @@ func main() {
 			if *delayms > 0 {
 				time.Sleep(time.Duration(*delayms) * time.Millisecond)
 			}
-			side := rng.Intn(2)   // 0 buy, 1 sell
-			anchor := waveAt()    // shared time-based price wave (all generators agree)
+			now := float64(time.Now().UnixNano()) / 1e9
+			anchor := *mid + 250*math.Sin(now/18.0) + 90*math.Sin(now/5.0)         // the wave (price target)
+			slope := (250.0/18.0)*math.Cos(now/18.0) + (90.0/5.0)*math.Cos(now/5.0) // its direction
+			// bias side toward the trend: rising => ~62% buys, falling => ~62% sells
+			side := 0 // buy
+			if slope >= 0 {
+				if rng.Float64() >= 0.62 {
+					side = 1
+				}
+			} else {
+				if rng.Float64() < 0.62 {
+					side = 1
+				}
+			}
 			var body string
 			if rng.Intn(100) < *mktPct {
 				// MARKET order: buy consumes quote_amount, sell consumes size
@@ -57,14 +66,13 @@ func main() {
 					body = `{"side":1,"order_type":1,"mode":1,"size":0.001}`
 				}
 			} else {
-				// LIMIT order across a band: outer prices rest (depth = many levels),
-				// near-mid crossing prices trade.
+				// LIMIT order across a band, ALWAYS taker (mode=1). The engine matches a
+				// taker against the opposite side BEFORE resting the remainder, so an order
+				// priced through the book consumes the crossing side instead of leaving the
+				// book crossed; a non-crossing price simply rests -> depth. This is what keeps
+				// the book valid (best bid < best ask) while the price trends.
 				off := float64(rng.Intn(2*(*band)+1) - *band)
-				mode := 0
-				if (side == 0 && off >= 1) || (side == 1 && off <= -1) {
-					mode = 1 // aggressive -> taker
-				}
-				body = fmt.Sprintf(`{"side":%d,"order_type":0,"mode":%d,"price":%.0f,"size":0.001}`, side, mode, anchor+off)
+				body = fmt.Sprintf(`{"side":%d,"order_type":0,"mode":1,"price":%.0f,"size":0.001}`, side, anchor+off)
 			}
 			req, _ := http.NewRequest("POST", url, bytes.NewBufferString(body))
 			req.Header.Set("Content-Type", "application/json")
