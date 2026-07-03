@@ -225,6 +225,15 @@ for key, note in AUTHORED.items():
     path, name = key.split("::", 1)
     KP_BY_IDENT.setdefault((path, name.split(".")[-1]), note)
 
+# Comprehensive per-declaration notes (every named piece), keyed exactly
+# "relpath::name" as label_for produces the name. Curated notes above win;
+# these fill in everything else.
+PIECE_NOTES = {}
+PIECE_NOTES_PATH = os.path.join(os.path.dirname(OUT), "piece_notes.json")
+if os.path.exists(PIECE_NOTES_PATH):
+    import json as _json
+    PIECE_NOTES = _json.load(open(PIECE_NOTES_PATH, encoding="utf-8"))
+
 def file_block(relpath, note=""):
     full = os.path.join(SRC, relpath)
     with open(full, "r", encoding="utf-8") as f:
@@ -252,7 +261,10 @@ def file_block(relpath, note=""):
             k, name = label_for(lines)
             title = "Add %s%s" % (KINDWORD.get(k, "the next piece"), (" <code>%s</code>" % esc(name)) if name else "")
             parts.append('<div class="piece"><div class="piece-h"><span class="pn">%d</span> %s</div>' % (piece, title))
-            pnote = KP_BY_IDENT.get((relpath, name.split(".")[-1])) if name else None
+            pnote = None
+            if name:
+                pnote = (KP_BY_IDENT.get((relpath, name.split(".")[-1]))
+                         or PIECE_NOTES.get("%s::%s" % (relpath, name)))
             if pnote:
                 parts.append('<p class="pnote">%s</p>' % pnote)
             parts.append('<pre><code>%s</code></pre>' % esc(code))
