@@ -77,6 +77,16 @@ func initDB(testMode bool) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ensure ohlcv_1min table: %w", err)
 	}
 
+	// Persist login tokens so a session survives a backend restart (the in-memory token
+	// cache is rehydrated from here on a cache miss). Pre-launch demo convenience.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS credentials (
+		token TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`); err != nil {
+		return nil, fmt.Errorf("failed to ensure credentials table: %w", err)
+	}
+
 	// Purge garbage candles seeded from the 0.01 index-price fallback: a single bar with
 	// low_price ~0.01 stretches the chart's price axis from 0.01 to ~65000 and makes it
 	// look frozen. Safe here because every demo market trades far above 0.02.

@@ -76,7 +76,7 @@ func NewContainer(db *sql.DB, engine *core.MatchingEngine) *Container {
 	}
 
 	// init cache
-	c.CredentialCache = security.NewCredentialCache()
+	c.CredentialCache = security.NewCredentialCache(c.DB)
 
 	// init repositories
 	c.initRepositories()
