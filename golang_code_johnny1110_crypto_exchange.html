@@ -274,6 +274,17 @@
   <li><a href="#f8">F.8 &mdash; A scheduler: a ticker in a goroutine</a></li>
   <li><a href="#f9">F.9 &mdash; How to read ANY Go file you've never seen (a method)</a></li>
 </ol>
+<strong>Part G &mdash; Order types in full: maker, taker, limit, market</strong>
+<ol start="64">
+  <li><a href="#g1">G.1 &mdash; Two independent dimensions: TYPE and MODE (the full matrix)</a></li>
+  <li><a href="#g2">G.2 &mdash; LIMIT vs MARKET (price, or no price)</a></li>
+  <li><a href="#g3">G.3 &mdash; MAKER vs TAKER (rest, or cross)</a></li>
+  <li><a href="#g4">G.4 &mdash; The dispatch: how an order is routed in code</a></li>
+  <li><a href="#g5">G.5 &mdash; MAKER code: <code>makeLimitOrder</code></a></li>
+  <li><a href="#g6">G.6 &mdash; TAKER-LIMIT code: <code>takeLimitOrder</code> + <code>canMatch</code></a></li>
+  <li><a href="#g7">G.7 &mdash; MARKET code: sweeping by size vs by quote-amount</a></li>
+  <li><a href="#g8">G.8 &mdash; Full cheat-sheet, fields &amp; edge cases</a></li>
+</ol>
 </details>
 
 <!-- ============================================================ -->
@@ -2099,6 +2110,181 @@ UPDATE balances
   <li><strong>Lean on the compiler and tests.</strong> <code>go build ./...</code> catches your misunderstandings instantly; the <code>_test.go</code> files are worked examples of how a type is meant to be used.</li>
 </ol>
 <div class="note"><strong>You now have the full toolkit.</strong> Part&nbsp;A taught the language, Part&nbsp;B built the app, Part&nbsp;D showed the real-world changes, Part&nbsp;E the concepts, and Part&nbsp;F how to read the code. Open the repo, pick <code>main.go</code>, and use the F.9 method &mdash; nothing in it should feel like magic anymore.</div>
+
+<!-- ============================================================ -->
+<!-- PART G — order types in full                                 -->
+<!-- ============================================================ -->
+<h1 id="partG">Part G &mdash; Order types in full: maker, taker, limit, market</h1>
+<p>These four words confuse everyone at first because people think they're four kinds of order. They're not &mdash; they're <strong>two separate yes/no questions</strong> asked about every order. Get that and the rest is easy. This part defines each precisely, shows the exact code that implements it, and gives a worked example of every case.</p>
+
+<h2 id="g1">G.1 &mdash; Two independent dimensions</h2>
+<p>Every order answers two questions, and they're independent:</p>
+<table>
+<tr><th>Question</th><th>The dimension</th><th>Values (in code)</th><th>Means</th></tr>
+<tr><td>Do I name a price, or just "whatever's available"?</td><td><strong>TYPE</strong></td><td><code>OrderType</code>: <code>LIMIT(0)</code> / <code>MARKET(1)</code></td><td>LIMIT has a price limit; MARKET has none.</td></tr>
+<tr><td>Do I want to rest in the book, or trade right now?</td><td><strong>MODE</strong></td><td><code>Mode</code>: <code>MAKER(0)</code> / <code>TAKER(1)</code></td><td>MAKER adds liquidity (waits); TAKER removes it (crosses now).</td></tr>
+</table>
+<p>They come from the enums in <code>engine-v2/model/order.go</code> (the <code>iota</code> pattern from Part&nbsp;A.5):</p>
+<pre><code>const ( LIMIT OrderType = iota; MARKET )   // 0, 1
+const ( BID Side = iota; ASK )             // 0=buy, 1=sell
+const ( MAKER Mode = iota; TAKER )         // 0, 1</code></pre>
+<p>So an order also carries a third dimension you already know &mdash; <strong>SIDE</strong> (buy/sell). Combine TYPE &times; MODE and here is the full matrix of what's meaningful:</p>
+<table>
+<tr><th></th><th>MAKER (rest)</th><th>TAKER (cross now)</th></tr>
+<tr><td><strong>LIMIT</strong></td><td><strong>Limit-maker</strong>: "rest my buy at 64 000 and wait." Adds a rung to the book, never trades on entry. Pays the low <em>maker</em> fee when later filled.</td><td><strong>Limit-taker</strong>: "buy up to 65 020, right now." Crosses the book while price allows, rests any leftover. Pays the <em>taker</em> fee on what it trades.</td></tr>
+<tr><td><strong>MARKET</strong></td><td><em>(not used)</em> &mdash; a market order has no price to rest at, so "market-maker" is meaningless. Market orders are always takers.</td><td><strong>Market</strong>: "buy/sell immediately at whatever price the book offers." Always a taker; never rests. Buy spends a <em>quote budget</em>; sell delivers a <em>size</em>.</td></tr>
+</table>
+<div class="note"><strong>The one-liner to memorise:</strong> TYPE = "do I have a price limit?"; MODE = "do I cross now or wait?". Maker &harr; taker is about <em>who provided the liquidity</em>; limit &harr; market is about <em>whether you set a price</em>.</div>
+
+<h2 id="g2">G.2 &mdash; LIMIT vs MARKET</h2>
+<h4>LIMIT order &mdash; you set the price</h4>
+<p>"Buy 0.5 BTC, but pay no more than 65 020" (or "sell&hellip; for no less than X"). It carries a <code>Price</code> and a <code>Size</code>. It will only ever trade at your price <em>or better</em>. If it can't (fully) trade now, the rest waits in the book. This is the safe, default order &mdash; you're never surprised by the price.</p>
+<h4>MARKET order &mdash; you accept the going price</h4>
+<p>"Buy immediately, I don't care about the exact price, just fill me." It has <em>no</em> price limit, so it walks the book eating the best available rungs until it's done. Fast, but the price can slip if the book is thin (that's called <em>slippage</em>). A subtle but important asymmetry in how you size a market order:</p>
+<ul>
+  <li><strong>Market BUY</strong> is sized by a <strong>quote budget</strong> (<code>quote_amount</code>): "spend 19 500 USDT on BTC." You can't say "buy 0.3 BTC at market" cleanly because you don't know the price yet &mdash; but you <em>do</em> know how much cash you'll spend.</li>
+  <li><strong>Market SELL</strong> is sized by <strong>size</strong> (<code>size</code>): "sell 0.3 BTC at market." You know how much of the asset you hold, so you specify quantity.</li>
+</ul>
+<p>You can see this exact split in the API bodies the load generator sends:</p>
+<pre><code>// market BUY  -> quote_amount (how much USDT to spend)
+{"side":0, "order_type":1, "mode":1, "quote_amount":19500}
+// market SELL -> size (how much BTC to sell)
+{"side":1, "order_type":1, "mode":1, "size":0.3}</code></pre>
+
+<h2 id="g3">G.3 &mdash; MAKER vs TAKER</h2>
+<p>Same two orders can meet; they play opposite roles (recap of E.4, now precise):</p>
+<ul>
+  <li>A <strong>MAKER</strong> order is placed to <em>rest</em>. It "makes" the market by adding a resting price a future trader can hit. In code, a maker limit order skips matching entirely and is inserted straight into the book.</li>
+  <li>A <strong>TAKER</strong> order "takes" liquidity by crossing an existing resting order. In code, a taker runs the matching loop first, then rests only whatever it couldn't fill.</li>
+</ul>
+<p><strong>Fees follow the role, not the type</strong>: makers pay less (they helped), takers pay more (they consumed). Both rates are stamped on every <code>Trade</code> per side (<code>bid_fee_rate</code>, <code>ask_fee_rate</code>). And note the crucial invariant from E.3: a maker order is trusted <em>not</em> to cross &mdash; if you send a "maker" priced through the book, this engine will rest it and create a crossed book. The order-entry layer must guarantee makers don't cross (which is exactly why the demo generator switched to all-taker limits, see Part&nbsp;D/E.3).</p>
+
+<h2 id="g4">G.4 &mdash; The dispatch: how an order is routed in code</h2>
+<p>Placement is a two-level switch: first on TYPE, then (for limit) on MODE, or (for market) on SIDE.</p>
+<span class="file-path">engine-v2/book/orderbook.go</span>
+<pre><code>func (ob *OrderBook) PlaceOrder(orderType model.OrderType, order *model.Order) ([]Trade, error) {
+    ob.obMu.Lock(); defer ob.obMu.Unlock()               // one lock for the whole placement
+    if ob.orderIndex.OrderIdExist(order.ID) { return nil, ErrOrderExists }
+    switch orderType {                                    // level 1: TYPE
+    case model.LIMIT:  return ob.placeLimitOrder(order)
+    case model.MARKET: return ob.placeMarketOrder(order)
+    default:           return nil, ErrUnsupportedOrderType
+    }
+}
+
+func (ob *OrderBook) placeLimitOrder(order *model.Order) ([]Trade, error) {
+    if order.Mode == model.MAKER {                        // level 2a: MODE
+        return nil, ob.makeLimitOrder(order)              // maker  -> just rest
+    }
+    trades, err := ob.takeLimitOrder(order)               // taker  -> match then rest
+    if err != nil { return nil, err }
+    ob.updateLatestPrice(trades)
+    return trades, nil
+}
+
+func (ob *OrderBook) placeMarketOrder(order *model.Order) ([]Trade, error) {
+    switch order.Side {                                   // level 2b: SIDE
+    case model.BID: return ob.takeMarketBidOrder(order)   // buy  by quote-budget
+    case model.ASK: return ob.takeMarketAskOrder(order)   // sell by size
+    }
+    // ... error
+}</code></pre>
+<p>Read top-down: lock the book, reject duplicate IDs, then route. Four leaves &mdash; <code>makeLimitOrder</code>, <code>takeLimitOrder</code>, <code>takeMarketBidOrder</code>, <code>takeMarketAskOrder</code> &mdash; are the only places matching logic lives.</p>
+
+<h2 id="g5">G.5 &mdash; MAKER code: <code>makeLimitOrder</code></h2>
+<pre><code>func (ob *OrderBook) makeLimitOrder(order *model.Order) error {
+    node := &amp;model.OrderNode{Order: order}   // wrap the order in a list node
+    side := ob.getSide(order.Side)            // pick bid or ask ladder
+    side.AddOrderNode(order.Price, node)      // append to the queue at this price rung
+    ob.addOrderIndex(node)                    // record orderID -> node for O(1) cancel
+    return nil
+}</code></pre>
+<p>That's the entire maker path: <strong>no matching at all.</strong> Wrap the order in a linked-list node, drop it at the back of the queue for its price rung (time priority &mdash; back of the line), and register it in the index so it can be cancelled instantly later. It just sits there providing liquidity until a taker hits it.</p>
+
+<h2 id="g6">G.6 &mdash; TAKER-LIMIT code: <code>takeLimitOrder</code> + <code>canMatch</code></h2>
+<p>The taker path is the matching loop dissected in F.3 &mdash; here it is again with the price-cross test that governs it:</p>
+<pre><code>func (ob *OrderBook) takeLimitOrder(order *model.Order) ([]Trade, error) {
+    var trades []Trade
+    opposite := ob.getOppositeSide(order.Side)
+    for order.RemainingSize &gt; 0 {
+        bestPrice, err := opposite.BestPrice()
+        if err != nil || !ob.canMatch(order.Side, order.Price, bestPrice) {
+            break                              // no counter-order, or price no longer crosses
+        }
+        trade, shouldContinue, err := ob.executeMatch(order, opposite, bestPrice)
+        if err != nil { return trades, err }
+        trades = append(trades, trade)
+        if !shouldContinue { break }
+    }
+    if order.RemainingSize &gt; 0 {                // leftover becomes a resting MAKER
+        ob.makeLimitOrder(order)
+    }
+    return trades, nil
+}
+
+func (ob *OrderBook) canMatch(orderSide model.Side, orderPrice, bestPrice float64) bool {
+    if orderSide == model.BID { return orderPrice &gt;= bestPrice }   // buy fills at asks &le; my price
+    return orderPrice &lt;= bestPrice                                 // sell fills at bids &ge; my price
+}</code></pre>
+<p><strong><code>canMatch</code> is the price-cross rule.</strong> A BID (buyer) can trade only when its price is at least the best ask (willing to pay enough). An ASK (seller) can trade only when its price is at most the best bid (willing to accept enough). When that's no longer true, the loop breaks and the remainder rests via <code>makeLimitOrder</code> &mdash; note how a taker <em>becomes</em> a maker for its unfilled part. That's the one place the two modes meet.</p>
+
+<h2 id="g7">G.7 &mdash; MARKET code: sweeping by size vs by quote-amount</h2>
+<p>Market orders have no price limit, so there's no <code>canMatch</code> guard &mdash; they eat the best rungs until their <em>budget</em> runs out. The buy version is sized by a quote budget; watch it drain <code>remainingQuoteAmt</code>:</p>
+<span class="file-path">engine-v2/book/orderbook.go &mdash; takeMarketBidOrder (real code, trimmed)</span>
+<pre><code>func (ob *OrderBook) takeMarketBidOrder(order *model.Order) (trades []Trade, err error) {
+    opposite := ob.getOppositeSide(order.Side)
+    if opposite.totalQuoteAmount &lt; order.QuoteAmount {          // 1 can the book even fill this budget?
+        return nil, fmt.Errorf("%w for market bid order in %s", ErrInsufficientVolume, ob.market.Name)
+    }
+    remainingQuoteAmt := order.QuoteAmount
+    for remainingQuoteAmt &gt; utils.Scale {                       // 2 spend until budget ~0
+        bestNode, err := opposite.PopBest()                    //   take the cheapest ask
+        if err != nil { break }
+        oppositeOrder := bestNode.Order
+        oppositeOrderQuoteAmt := oppositeOrder.RemainingSize * oppositeOrder.Price
+        var tradeQty float64
+        if remainingQuoteAmt &gt;= oppositeOrderQuoteAmt {         // 3 budget covers this whole rung?
+            tradeQty = oppositeOrder.RemainingSize             //   eat it all
+        } else {
+            tradeQty = remainingQuoteAmt / oppositeOrder.Price //   else buy what the budget affords
+        }
+        trades = append(trades, ob.createTrade(order, oppositeOrder, oppositeOrder.Price, tradeQty))
+        oppositeOrder.RemainingSize -= tradeQty                // 4 shrink the counter-order
+        remainingQuoteAmt          -= tradeQty * oppositeOrder.Price   // shrink my budget
+        order.OriginalSize         += tradeQty                 // record how much I ended up buying
+        if oppositeOrder.RemainingSize &gt; 0 {                   // 5 counter-order partly left?
+            opposite.PutToHead(oppositeOrder.Price, bestNode)  //   put it back at the FRONT (keeps time priority)
+        } else {
+            ob.removeOrderIndex(oppositeOrder.ID)              //   fully eaten -> drop from index
+        }
+    }
+    return trades, err
+}</code></pre>
+<ol>
+  <li><strong>Feasibility check:</strong> if the whole opposite side holds less quote value than the budget, reject up front (can't fill a market buy the book can't satisfy).</li>
+  <li><strong>Loop until the budget is spent</strong> (down to the epsilon dust).</li>
+  <li><strong>Per rung:</strong> if the budget can afford the entire best order, eat it whole; otherwise buy exactly what the remaining budget affords at that price (<code>budget / price</code>).</li>
+  <li>Shrink the counter-order and the budget; grow <code>OriginalSize</code> so the order records how much BTC it actually bought (a market buy's final size is only known after the sweep).</li>
+  <li><strong>Fairness on partial:</strong> if the counter-order is only partly consumed, it's pushed back to the <em>head</em> of its rung so it keeps its place in line (time priority preserved).</li>
+</ol>
+<p>The sell version (<code>takeMarketAskOrder</code>) is the mirror image: it checks the opposite side has enough <em>total volume</em> (not quote value), and sweeps best <em>bids</em> until the seller's <code>size</code> is delivered. Same loop, sized by quantity instead of cash.</p>
+
+<h2 id="g8">G.8 &mdash; Cheat-sheet, fields &amp; edge cases</h2>
+<table>
+<tr><th>Order</th><th>API fields</th><th>Sized by</th><th>Rests?</th><th>Fee role</th><th>Engine leaf</th></tr>
+<tr><td>Limit maker buy/sell</td><td>side, price, size, mode=0</td><td>size</td><td>always (never trades on entry)</td><td>maker</td><td><code>makeLimitOrder</code></td></tr>
+<tr><td>Limit taker buy/sell</td><td>side, price, size, mode=1</td><td>size</td><td>only the unfilled remainder</td><td>taker on filled part</td><td><code>takeLimitOrder</code></td></tr>
+<tr><td>Market buy</td><td>side=0, quote_amount, mode=1</td><td>quote budget</td><td>never</td><td>taker</td><td><code>takeMarketBidOrder</code></td></tr>
+<tr><td>Market sell</td><td>side=1, size, mode=1</td><td>size</td><td>never</td><td>taker</td><td><code>takeMarketAskOrder</code></td></tr>
+</table>
+<p><strong>Edge cases worth knowing:</strong></p>
+<ul>
+  <li><strong>Market buy's <code>OriginalSize</code> is filled in <em>after</em> matching</strong> (you don't know the BTC quantity until the sweep finishes), which is why the placement phase has a special "update original size" step for market bids.</li>
+  <li><strong>A taker limit that fully fills</strong> leaves nothing to rest; one that partly fills rests the rest as a maker &mdash; so a single order can be both taker (for the crossed part) and maker (for the leftover), and is billed accordingly per fill.</li>
+  <li><strong>Insufficient liquidity:</strong> a market order the book can't satisfy is rejected up front (the feasibility check), rather than partially filling and leaving the user in a surprising state.</li>
+  <li><strong>Freeze amounts differ by case</strong> (Part&nbsp;E.5): a buy freezes quote currency (price&times;size, or the quote budget); a sell freezes base currency (size).</li>
+</ul>
+<div class="note"><strong>Bottom line:</strong> there are only four leaves in the engine, and you've now read all four. TYPE picks limit-vs-market, MODE picks rest-vs-cross, SIDE picks buy-vs-sell, and the fee simply follows whether you made or took liquidity. Everything a trader can do routes through <code>PlaceOrder</code> into one of these four functions.</div>
 
 <p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents the changes made in this working copy &mdash; SQLite WAL tuning; a WebSocket-first data flow with a private <code>user_data</code> channel; system-level orders/trades counters; a 1-minute OHLCV interval; a read-only DB viewer; and the measured throughput behind them. License of the original project: non-commercial use only.</p>
 
