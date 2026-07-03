@@ -41,6 +41,7 @@
           <button class="sim-btn stop" @click="simStop" :disabled="!simRunning">&#9209; STOP</button>
           <button class="sim-btn reset" @click="simReset">&#8635; RESET</button>
         </div>
+        <div class="sim-duration">DURATION: {{ simDuration }} sec</div>
 
         <h4>Asks</h4>
         <table class="orderbook-table ask">
@@ -347,6 +348,8 @@ export default {
       sysUnsub: null,
       refreshInterval: null,
       simRunning: false,
+      simDuration: 0,
+      durationTimer: null,
       orderType: 'limit',
       market: "",
       placeOrderBtn: "Buy",
@@ -397,6 +400,12 @@ export default {
     await this.fetchBalances()
     this.startAutoRefresh()
     this.simCheck()
+    // tick the "Duration" each second while running; periodically re-sync with the server
+    let simTick = 0
+    this.durationTimer = setInterval(() => {
+      if (this.simRunning) this.simDuration++
+      if (++simTick % 10 === 0) this.simCheck()
+    }, 1000)
     const baseAsset = 'ETH'; // Example dynamic data
     const quoteAsset = 'USD'; // Example dynamic data
     this.cmdOutputList.push(`C:\\CryptoEx> trading ${baseAsset}/${quoteAsset}
@@ -428,6 +437,7 @@ export default {
     if (this.obUnsub) { this.obUnsub(); this.obUnsub = null }
     if (this.userUnsub) { this.userUnsub(); this.userUnsub = null }
     if (this.sysUnsub) { this.sysUnsub(); this.sysUnsub = null }
+    if (this.durationTimer) { clearInterval(this.durationTimer); this.durationTimer = null }
   },
   methods: {
 
@@ -781,7 +791,7 @@ export default {
       return `http://${window.location.hostname}:8091/${path}`
     },
     async simStart() {
-      try { await fetch(this.simUrl('start'), { method: 'POST' }); this.simRunning = true }
+      try { await fetch(this.simUrl('start'), { method: 'POST' }); this.simRunning = true; this.simDuration = 0 }
       catch (e) { console.error('sim start failed', e) }
     },
     async simStop() {
@@ -790,12 +800,16 @@ export default {
     },
     async simReset() {
       if (!window.confirm('RESET will DELETE all orders & trades, re-fund users and clear the book. Continue?')) return
-      try { await fetch(this.simUrl('reset'), { method: 'POST' }); this.simRunning = false }
+      try { await fetch(this.simUrl('reset'), { method: 'POST' }); this.simRunning = false; this.simDuration = 0 }
       catch (e) { console.error('sim reset failed', e) }
     },
     async simCheck() {
-      try { const r = await fetch(this.simUrl('status')); const j = await r.json(); this.simRunning = !!j.running }
-      catch (e) { /* control service unreachable */ }
+      try {
+        const r = await fetch(this.simUrl('status'))
+        const j = await r.json()
+        this.simRunning = !!j.running
+        if (typeof j.duration === 'number') this.simDuration = j.duration // server truth (survives reload)
+      } catch (e) { /* control service unreachable */ }
     },
     changePlaceOrderBtn(btnName) {
       this.placeOrderBtn = btnName;
@@ -970,6 +984,19 @@ body {
 .sim-btn.stop  { background: #b22222; }
 .sim-btn.reset { background: #cc6600; }
 .sim-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.sim-duration {
+  text-align: center;
+  margin: 2px 0 12px;
+  padding: 6px;
+  border: 2px solid #ffcc00;
+  border-radius: 6px;
+  background: #1a1400;
+  color: #ffcc00;
+  font-weight: bold;
+  letter-spacing: 2px;
+  font-size: 14px;
+  text-shadow: 0 0 6px rgba(255,204,0,0.6);
+}
 
 .orderbook-container h4 {
   font-size: 11px;
