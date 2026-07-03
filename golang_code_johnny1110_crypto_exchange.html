@@ -285,6 +285,20 @@
   <li><a href="#g7">G.7 &mdash; MARKET code: sweeping by size vs by quote-amount</a></li>
   <li><a href="#g8">G.8 &mdash; Full cheat-sheet, fields &amp; edge cases</a></li>
 </ol>
+<strong>Part H &mdash; The folders, wired: every workflow traced end-to-end</strong>
+<ol start="72">
+  <li><a href="#h1">H.1 &mdash; The dependency graph (who imports whom, and the rule)</a></li>
+  <li><a href="#h2">H.2 &mdash; Every folder, what's in it, who calls it</a></li>
+  <li><a href="#h3">H.3 &mdash; The container: the one place it's all wired</a></li>
+  <li><a href="#h4">H.4 &mdash; Workflow: register a user</a></li>
+  <li><a href="#h5">H.5 &mdash; Workflow: login &amp; authenticated requests</a></li>
+  <li><a href="#h6">H.6 &mdash; Workflow: place a limit order (the full trace)</a></li>
+  <li><a href="#h7">H.7 &mdash; Workflow: cancel an order</a></li>
+  <li><a href="#h8">H.8 &mdash; Workflow: order book snapshot &rarr; your screen</a></li>
+  <li><a href="#h9">H.9 &mdash; Workflow: a trade becomes a candlestick</a></li>
+  <li><a href="#h10">H.10 &mdash; Workflow: the AMM keeps the book liquid</a></li>
+  <li><a href="#h11">H.11 &mdash; Workflow: boot &amp; crash recovery</a></li>
+</ol>
 </details>
 
 <!-- ============================================================ -->
@@ -2285,6 +2299,166 @@ func (ob *OrderBook) canMatch(orderSide model.Side, orderPrice, bestPrice float6
   <li><strong>Freeze amounts differ by case</strong> (Part&nbsp;E.5): a buy freezes quote currency (price&times;size, or the quote budget); a sell freezes base currency (size).</li>
 </ul>
 <div class="note"><strong>Bottom line:</strong> there are only four leaves in the engine, and you've now read all four. TYPE picks limit-vs-market, MODE picks rest-vs-cross, SIDE picks buy-vs-sell, and the fee simply follows whether you made or took liquidity. Everything a trader can do routes through <code>PlaceOrder</code> into one of these four functions.</div>
+
+<!-- ============================================================ -->
+<!-- PART H — the folders, wired: workflows end to end            -->
+<!-- ============================================================ -->
+<h1 id="partH">Part H &mdash; The folders, wired: every workflow traced end-to-end</h1>
+<p>You've met the folders (A.21) and the concepts (E). Now watch them <strong>work together</strong>. For each thing a user can do, we trace the request through <em>every folder it touches</em>, in order, naming the file and function at each hop. If you ever wonder "where does X happen?", find the matching workflow and follow the arrows.</p>
+
+<h2 id="h1">H.1 &mdash; The dependency graph (who imports whom)</h2>
+<p>Go folders are packages, and packages can only depend <strong>inward</strong> &mdash; outer layers import inner ones, never the reverse. The compiler enforces it (a cycle won't build). Here is the whole graph; an arrow means "imports / depends on":</p>
+<div class="diagram"><pre>
+  main.go, router.go, startup_helper.go        ← the composition root (package main)
+        │ builds & owns everything below
+        ▼
+  container/           ← wires all the pieces (the ONLY package that knows every concrete type)
+        │
+   ┌────┼─────────────┬──────────────┬───────────────┐
+   ▼    ▼             ▼              ▼               ▼
+ controller/  middleware/   ws/          scheduler/    metrics/     ← delivery / transport
+   │          (auth,CORS)   (hub,client)  (4 jobs)
+   │  all call ↓
+   ▼
+ service/  ── service/impl/ , service/impl/amm/ , service/serviceHelper/   ← business rules (money)
+   │  calls ↓                                   uses ↓
+   ▼                                            ▼
+ repository/ ── repository/impl/     dto/          ohlcv/           external/  chainUtil/
+   │  (SQL)                          (shapes)      (candles)        (index API)(eth)
+   ▼  uses ↓
+ engine-v2/  ── model/ ▸ book/ ▸ core/ ▸ market/ ▸ util/   ← the pure matching engine (ZERO app deps)
+        │
+        ▼
+ settings/   utils/   security/     ← leaf packages (import almost nothing; safe for anyone to use)
+</pre></div>
+<p>Three rules make this hold together:</p>
+<ul>
+  <li><strong>Interfaces point in, implementations live out.</strong> <code>service/</code> and <code>repository/</code> hold the interfaces; <code>service/impl/</code> and <code>repository/impl/</code> hold the code. A caller depends on the interface package, so it never drags in SQLite or the engine internals.</li>
+  <li><strong><code>dto/</code> is the neutral meeting point.</strong> Both <code>controller</code> (outer) and <code>service</code> (inner) need the same shapes, so the shapes live in their own package both can import &mdash; no cycle.</li>
+  <li><strong>Leaf packages have no interesting imports</strong> (<code>utils</code>, <code>settings</code>, <code>security</code>, <code>engine-v2/model</code>), so anyone may import them freely &mdash; which is exactly why the system-wide counters live in <code>utils</code> (both the order service and the ws feeder use them).</li>
+</ul>
+
+<h2 id="h2">H.2 &mdash; Every folder, what's in it, who calls it</h2>
+<table>
+<tr><th>Folder</th><th>Holds</th><th>Called by</th><th>Calls</th></tr>
+<tr><td><code>main</code> (root files)</td><td><code>main.go</code>, <code>router.go</code>, <code>db.go</code>, <code>startup_helper.go</code></td><td>the OS (it's the entry point)</td><td>container, everything at boot</td></tr>
+<tr><td><code>container/</code></td><td>the DI wiring struct + <code>init*</code> methods</td><td><code>main.go</code></td><td>every service, repo, scheduler, engine, ws hub</td></tr>
+<tr><td><code>controller/</code></td><td>HTTP handlers (one per route group)</td><td>the Gin router</td><td>the <code>service</code> interfaces</td></tr>
+<tr><td><code>middleware/</code></td><td>CORS, error handling, <strong>Auth</strong>, Admin-token</td><td>the router (wraps handlers)</td><td><code>security.CredentialCache</code></td></tr>
+<tr><td><code>service/</code> + <code>impl/</code></td><td>business logic: orders, users, balances, admin, market-data</td><td>controllers, schedulers, ws feeder</td><td>repositories, engine, ohlcv stream, <code>serviceHelper</code></td></tr>
+<tr><td><code>service/impl/amm/</code></td><td>the market-maker bot logic</td><td>the LQDT scheduler</td><td>order service, external index price</td></tr>
+<tr><td><code>service/serviceHelper/</code></td><td>settlement math, engine-order conversion, tx helper</td><td>the order service</td><td><code>dto</code>, engine model</td></tr>
+<tr><td><code>repository/</code> + <code>impl/</code></td><td>SQL for users/balances/orders/trades</td><td>services</td><td>the database (<code>*sql.DB</code>/<code>*sql.Tx</code>)</td></tr>
+<tr><td><code>engine-v2/</code></td><td>the matching engine (model, book, core, market, util)</td><td>the order service</td><td>nothing outside itself</td></tr>
+<tr><td><code>dto/</code></td><td>request/response/cross-layer shapes</td><td>everyone</td><td>engine model (for conversions)</td></tr>
+<tr><td><code>ohlcv/</code></td><td>candlestick aggregator + repo + worker pool</td><td>order service (trade stream), ws feeder</td><td>the database</td></tr>
+<tr><td><code>ws/</code></td><td>the WebSocket hub + client + message model</td><td>startup, the ws feeder</td><td>gorilla/websocket</td></tr>
+<tr><td><code>scheduler/</code></td><td>the 4 periodic jobs (snapshot, market-data, AMM, ws-feeder)</td><td>startup</td><td>engine, services, ws hub, ohlcv</td></tr>
+<tr><td><code>security/</code></td><td>the token&rarr;user cache (now DB-backed)</td><td>auth middleware, user service, ws feeder</td><td>the database</td></tr>
+<tr><td><code>settings/</code>, <code>utils/</code></td><td>markets/assets config; math + counters</td><td>everyone</td><td>almost nothing (leaves)</td></tr>
+<tr><td><code>external/</code>, <code>chainUtil/</code></td><td>BTSE index price; optional Ethereum client</td><td>the AMM / (legacy)</td><td>the internet</td></tr>
+</table>
+
+<h2 id="h3">H.3 &mdash; The container: the one place it's all wired</h2>
+<p>Nothing constructs its own dependencies; <code>container.NewContainer(db, engine)</code> does it once, in order, and hands each piece exactly what it needs (as interfaces). The order is a dependency order &mdash; you can read it top to bottom:</p>
+<pre><code>func NewContainer(db, engine) *Container {
+    c.CredentialCache = security.NewCredentialCache(db)   // token store (DB-backed)
+    c.initRepositories()   // UserRepo, BalanceRepo, OrderRepo, TradeRepo, OHLCVRepo  (repository/impl)
+    c.initOHLCVAgg()       // candlestick aggregator + trade stream                    (ohlcv)
+    c.initServices()       // inject repos+engine into services                        (service/impl)
+    c.initWS()             // the ws hub                                               (ws)
+    c.initProxy()          // the AMM's exchange-function proxy                         (service/impl/amm)
+    c.initScheduler()      // the 4 jobs, given engine/services/hub/ohlcv              (scheduler)
+    c.initMetrics()        // prometheus metrics service                               (metrics)
+    return c
+}</code></pre>
+<p>So the container is the hub of the wheel: every arrow in H.1 is drawn <em>here</em>. Change an implementation, or ask "what depends on what?", and this one file answers.</p>
+
+<h2 id="h4">H.4 &mdash; Workflow: register a user</h2>
+<p><span class="pill">POST /api/v1/users/register</span> folders touched: <code>controller &rarr; service/impl &rarr; repository/impl (+ security) &rarr; DB</code></p>
+<ol>
+  <li><strong>router.go</strong> maps the path (public group) to <strong>controller/users.go</strong> <code>Register</code>.</li>
+  <li><strong>controller</strong> binds the JSON body to <code>dto.RegisterReq</code>, calls <code>userService.Register(username, password)</code>.</li>
+  <li><strong>service/impl/users.go</strong>: generate a snowflake/UUID id, <strong>hash the password</strong> (<code>golang.org/x/crypto/bcrypt</code>), then in a <code>WithTx</code>: <code>userRepo.Insert</code> + <code>balanceRepo.BatchCreate</code> (zeroed rows for every asset).</li>
+  <li><strong>repository/impl</strong> runs the <code>INSERT</code>s against the DB.</li>
+  <li>Response bubbles back <code>service &rarr; controller</code> as <code>{code, data:{user_id}}</code>.</li>
+</ol>
+
+<h2 id="h5">H.5 &mdash; Workflow: login &amp; authenticated requests</h2>
+<p><span class="pill">POST /api/v1/users/login</span> then any private call. Folders: <code>controller &rarr; service/impl &rarr; repository/impl</code>, then <code>middleware &rarr; security</code>.</p>
+<ol>
+  <li><strong>Login:</strong> controller &rarr; <strong>service/impl/users.go</strong> <code>Login</code>: <code>userRepo.GetUserByUsername</code>, <code>bcrypt.CompareHashAndPassword</code>, mint a token (UUID), <code>credentialCache.Put(token, user)</code>. The token comes back to the browser.</li>
+  <li><strong>security/credential.go</strong> <code>Put</code> stores it in memory <em>and</em> the <code>credentials</code> table (so it survives a restart &mdash; a fix from this working copy).</li>
+  <li><strong>Every later private request</strong> carries <code>Authorization: &lt;token&gt;</code>. <strong>middleware/middleware.go</strong> <code>AuthMiddleware</code> calls <code>credentialCache.Get(token)</code> &rarr; <strong>security</strong> returns the <code>*dto.User</code> (from memory, or rehydrated from the DB on a miss). The user is put into the Gin context for the handler to read.</li>
+  <li>If the token is unknown, the middleware returns 401 and the handler never runs.</li>
+</ol>
+
+<h2 id="h6">H.6 &mdash; Workflow: place a limit order (the full trace)</h2>
+<p><span class="pill">POST /api/v1/orders/BTC-USDT</span> &mdash; the marquee path. Folders touched, in order: <code>middleware &rarr; controller &rarr; service/impl (+ serviceHelper) &rarr; repository/impl &rarr; engine-v2 &rarr; ohlcv &rarr; utils</code>, then later <code>scheduler &rarr; ws</code>.</p>
+<ol>
+  <li><strong>middleware</strong> <code>AuthMiddleware</code> resolves the token &rarr; <code>*dto.User</code> into the context (H.5).</li>
+  <li><strong>controller/orders.go</strong> <code>PlaceOrder</code>: read the user + <code>:market</code>, bind <code>dto.OrderReq</code> (side, order_type, mode, price, size), call <code>orderService.PlaceOrder(...)</code>.</li>
+  <li><strong>service/impl/orders.go</strong> <code>initializeOrderContext</code>: validate, split market into base/quote (via <strong>engine-v2/market</strong>/settings), decide the <em>freeze asset &amp; amount</em> and the fee rate/asset, build the <code>dto.Order</code>.</li>
+  <li><strong>Placement phase</strong> inside <code>WithTx</code> (<strong>service/serviceHelper</strong> tx helper):
+    <ul>
+      <li><strong>repository/impl/balances.go</strong> <code>LockedByUserIdAndAsset</code> &mdash; freeze funds (fails &rarr; <code>ErrInsufficientBalance</code>, whole tx rolls back).</li>
+      <li><strong>repository/impl/orders.go</strong> <code>Insert</code> &mdash; write the order row (status NEW).</li>
+      <li><strong>engine-v2/core</strong> <code>MatchingEngine.PlaceOrder</code> &rarr; <strong>engine-v2/book</strong> <code>OrderBook.PlaceOrder</code> &rarr; the maker/taker/market leaf (Part&nbsp;G) &mdash; returns <code>[]Trade</code>.</li>
+      <li><strong>repository/impl/trades.go</strong> <code>BatchInsert</code> &mdash; persist the fills.</li>
+      <li><strong>ohlcv</strong> <code>klineTradeStream.SyncTrade</code> &mdash; push each trade into the candlestick stream.</li>
+      <li><strong>utils</strong> <code>IncOrdersPlaced()</code> / <code>AddTrades(n)</code> &mdash; bump the system counters (the live badge).</li>
+    </ul>
+  </li>
+  <li><strong>Settlement phase</strong> (<strong>service/serviceHelper</strong> <code>ProcessTradeSettlement</code> &rarr; <strong>repository/impl</strong>): for each trade move balances &amp; fees, sync each affected order's remaining/avg/fees.</li>
+  <li><strong>controller</strong> returns <code>{code, data:{order, matches}}</code>. The synchronous story ends here.</li>
+  <li><strong>Asynchronously, milliseconds later:</strong> <strong>scheduler/orderbook_snapshot_job.go</strong> refreshes the top-20 snapshot (300&nbsp;ms), <strong>scheduler/ws_data_feeder.go</strong> pushes the new <code>orderbook</code> (400&nbsp;ms) + your <code>user_data</code> (1&nbsp;s) + <code>sysstats</code> through <strong>ws/hub.go</strong> to your browser, and the <strong>ohlcv</strong> aggregator rolls the trade into the current candle which the feeder also pushes.</li>
+</ol>
+<p>That single request touches <strong>ten folders</strong>. That's the whole architecture exercised in one trace &mdash; and every hop is an arrow from H.1.</p>
+
+<h2 id="h7">H.7 &mdash; Workflow: cancel an order</h2>
+<p><span class="pill">DELETE /api/v1/orders/{orderId}</span> folders: <code>middleware &rarr; controller &rarr; service/impl &rarr; engine-v2 + repository/impl</code>.</p>
+<ol>
+  <li><strong>middleware</strong> auth, then <strong>controller/orders.go</strong> <code>CancelOrder</code> &rarr; <code>orderService.CancelOrder(user, orderId)</code>.</li>
+  <li><strong>service/impl/orders.go</strong>: verify the order exists and belongs to this user (<strong>repository/impl</strong> read); reject if already closed.</li>
+  <li>In a <code>WithTx</code>: <strong>engine-v2/core</strong> <code>CancelOrder</code> &rarr; <strong>book</strong> removes the node via the O(1) <code>orderIndex</code> (Part&nbsp;E.7); <strong>repository/impl/orders.go</strong> sets status CANCELED; <strong>repository/impl/balances.go</strong> <code>UnlockedByUserIdAndAsset</code> returns the frozen funds (<code>locked &rarr; available</code>).</li>
+  <li>Snapshot + ws feeder push the updated book &amp; your orders (as in H.6 step&nbsp;7).</li>
+</ol>
+
+<h2 id="h8">H.8 &mdash; Workflow: order book snapshot &rarr; your screen</h2>
+<p>Two delivery routes, same source. Folders: <code>scheduler + engine-v2 &rarr; (ws | controller)</code>.</p>
+<ol>
+  <li><strong>scheduler/orderbook_snapshot_job.go</strong> every 300&nbsp;ms calls <strong>engine-v2/book</strong> <code>RefreshSnapshot</code> &mdash; copies the top-20 bids/asks into an immutable <code>BookSnapshot</code> (so reads never fight the matching lock, Part&nbsp;E.9).</li>
+  <li><strong>Push route:</strong> <strong>scheduler/ws_data_feeder.go</strong> (400&nbsp;ms) reads that snapshot via <code>orderBookService.GetSnapshot</code> and hands it to <strong>ws/hub.go</strong> <code>BroadcastToSubscribers</code>, which fans it to every client subscribed to the <code>orderbook</code> channel for that market.</li>
+  <li><strong>Pull route:</strong> <span class="pill">GET /orderbooks/:market/snapshot</span> &rarr; <strong>controller/orderbooks.go</strong> &rarr; the same <code>GetSnapshot</code>. Same data, one-shot.</li>
+</ol>
+
+<h2 id="h9">H.9 &mdash; Workflow: a trade becomes a candlestick</h2>
+<p>Folders: <code>service/impl &rarr; ohlcv &rarr; (ws | repository)</code>.</p>
+<ol>
+  <li>During placement (H.6), the order service calls <code>klineTradeStream.SyncTrade(trade)</code> &rarr; <strong>ohlcv</strong> trade stream (a channel).</li>
+  <li><strong>ohlcv/aggregator.go</strong> goroutines consume the stream, and for each supported interval (1m/15m/1h/1d/1w) update the <em>current</em> in-memory bar (open/high/low/close/volume) for that symbol &mdash; the realtime candle.</li>
+  <li>On an interval boundary the bar is marked closed and the <strong>worker pool</strong> flushes it to the DB (<code>ohlcv_1min</code>, etc.).</li>
+  <li><strong>Live:</strong> <strong>scheduler/ws_data_feeder.go</strong> reads the current bar (<code>GetRealtimeOHLCVData</code>) and pushes it on the <code>ohlcv</code> channel &rarr; the chart updates. <strong>History:</strong> <span class="pill">GET /markets/:m/ohlcv-history/:interval</span> &rarr; controller reads the closed bars from the DB.</li>
+</ol>
+
+<h2 id="h10">H.10 &mdash; Workflow: the AMM keeps the book liquid</h2>
+<p>No user triggers this &mdash; a scheduler does. Folders: <code>scheduler &rarr; service/impl/amm &rarr; external + service/impl (order) &rarr; engine + repository</code>.</p>
+<ol>
+  <li><strong>scheduler/lqdt_amm_job.go</strong> fires every 5&nbsp;minutes, per market.</li>
+  <li><strong>service/impl/amm</strong> <code>MakeMarket</code>: fetch a reference price from <strong>external/index_price_api.go</strong> (BTSE), read the market-maker account's balance &amp; open orders (<strong>repository/impl</strong>), compute an ideal 20-level bid/ask ladder capped by <code>settings.MAX_QUOTE_AMT_PER_LEVEL_MAP</code>.</li>
+  <li>It cancels stale quotes and places new ones by calling the <em>same</em> <code>orderService.PlaceOrder</code> a user would (H.6) &mdash; so AMM orders flow through the identical engine + settlement path. That's why the demo book always has depth to trade against.</li>
+</ol>
+
+<h2 id="h11">H.11 &mdash; Workflow: boot &amp; crash recovery</h2>
+<p>Folders: <code>main &rarr; db &rarr; container &rarr; (all) &rarr; engine-v2 + repository</code>.</p>
+<ol>
+  <li><strong>main.go</strong> &rarr; <strong>db.go</strong> <code>initDB</code>: open SQLite (WAL), ensure the <code>ohlcv_1min</code> &amp; <code>credentials</code> tables, purge garbage candles, seed the system counters from <code>COUNT(*)</code> (<strong>utils</strong>).</li>
+  <li><strong>engine-v2/core</strong> <code>NewMatchingEngine</code> builds 12 empty books.</li>
+  <li><strong>container</strong> wires everything (H.3).</li>
+  <li><strong>startup_helper.go</strong> <code>recoverOrderBook</code>: for each market, read every <code>NEW</code>/<code>PARTIAL</code> order from <strong>repository/impl</strong> and replay it into the book via <strong>engine-v2/core</strong> <code>RecoverOrderBook</code> &mdash; resting liquidity survives the restart (Part&nbsp;E.8).</li>
+  <li><strong>startup_helper.go</strong> starts the WS server (<strong>ws</strong>) and the 4 <strong>scheduler</strong> jobs, then <code>router.Run(":8080")</code> blocks and serves.</li>
+</ol>
+<div class="note"><strong>The point of Part&nbsp;H:</strong> no folder does anything alone. A single user action ripples inward (controller &rarr; service &rarr; repo/engine) and the result ripples back outward (settle &rarr; snapshot &rarr; ws &rarr; screen). Trace any one workflow above with the repo open and the whole "how do these folders talk to each other" question dissolves.</div>
 
 <p style="margin-top:3em;color:var(--muted);font-size:0.85rem;">Generated as a build-from-scratch companion to <code>github.com/johnny1110/crypto-exchange</code>. Every code excerpt is quoted from the repository at the paths shown. Part&nbsp;D documents the changes made in this working copy &mdash; SQLite WAL tuning; a WebSocket-first data flow with a private <code>user_data</code> channel; system-level orders/trades counters; a 1-minute OHLCV interval; a read-only DB viewer; and the measured throughput behind them. License of the original project: non-commercial use only.</p>
 
